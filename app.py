@@ -243,7 +243,7 @@ base_template = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RockabyWiFi - {title}</title>
+    <title>Rockabywifi - {title}</title>
     {% raw %}
     <style>
         :root {
@@ -397,8 +397,10 @@ base_template = """
     {% endraw %}
 </head>
 <body>
-    <nav class="navbar">
-        <a href="/" class="logo">&#x1F4E1; ROCKABYWIFI</a>
+   <a href="/" class="logo" style="display:flex; align-items:center; gap:8px;">
+    <img src="/static/icon-192.png" alt="RockabyTech" style="height:32px; width:32px; border-radius:6px;">
+    ROCKABY<span style="color:var(--primary-dark);">TECH</span>
+</a>
         <div class="nav-links">
             {nav_links}
         </div>
