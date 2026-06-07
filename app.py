@@ -176,8 +176,34 @@ def get_auto_approve():
     conn.close()
     return row[0] if row else 1
 
+def get_weekly_platform_revenue():
+    """Calculate 5% of all voucher plan prices generated this week (Sun-Sat)."""
+    today = date.today()
+    # Find the most recent Sunday (week start)
+    start_of_week = today - timedelta(days=today.weekday() + 1)  # weekday() 0=Mon, 6=Sun; we want Sunday
+    # If today is Sunday, start_of_week = today; else previous Sunday.
+    if today.weekday() == 6:  # Sunday
+        start_of_week = today
+    else:
+        start_of_week = today - timedelta(days=today.weekday() + 1)
+    end_of_week = start_of_week + timedelta(days=6)  # Saturday
+
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("""
+        SELECT COALESCE(SUM(pl.price_ugx), 0)
+        FROM vouchers v
+        JOIN plans pl ON v.plan_id = pl.id
+        WHERE v.provider_id = 1
+          AND date(v.created_at) BETWEEN ? AND ?
+    """, (start_of_week.isoformat(), end_of_week.isoformat()))
+    total_voucher_value = c.fetchone()[0]
+    conn.close()
+    platform_fee = int(total_voucher_value * 0.05)
+    return platform_fee, start_of_week, end_of_week
+
 # ------------------------------------------------------------
-# BASE TEMPLATE
+# BASE TEMPLATE (fixed with {% raw %} for CSS)
 # ------------------------------------------------------------
 base_template = """
 <!DOCTYPE html>
@@ -186,8 +212,9 @@ base_template = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RockabyWiFi - {title}</title>
+    {% raw %}
     <style>
-        :root {{
+        :root {
             --primary: #1a73e8;
             --primary-dark: #1557b0;
             --bg: #f0f4f8;
@@ -197,15 +224,15 @@ base_template = """
             --border: #e0e0e0;
             --radius: 12px;
             --shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }}
-        * {{ margin:0; padding:0; box-sizing:border-box; }}
-        body {{
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
-        }}
-        .navbar {{
+        }
+        .navbar {
             background: var(--card-bg);
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
             padding: 12px 20px;
@@ -213,27 +240,27 @@ base_template = """
             align-items: center;
             justify-content: space-between;
             flex-wrap: wrap;
-        }}
-        .navbar .logo {{
+        }
+        .navbar .logo {
             font-size: 1.3rem;
             font-weight: 700;
             color: var(--primary);
             text-decoration: none;
-        }}
-        .nav-links {{
+        }
+        .nav-links {
             display: flex;
             gap: 15px;
             flex-wrap: wrap;
             align-items: center;
-        }}
-        .nav-links a {{
+        }
+        .nav-links a {
             color: var(--text-secondary);
             text-decoration: none;
             font-weight: 500;
             font-size: 0.9rem;
-        }}
-        .nav-links a:hover {{ color: var(--primary); }}
-        .btn {{
+        }
+        .nav-links a:hover { color: var(--primary); }
+        .btn {
             display: inline-block;
             padding: 10px 20px;
             background: var(--primary);
@@ -244,49 +271,49 @@ base_template = """
             cursor: pointer;
             text-decoration: none;
             font-size: 0.9rem;
-        }}
-        .btn:hover {{ background: var(--primary-dark); }}
-        .btn-outline {{
+        }
+        .btn:hover { background: var(--primary-dark); }
+        .btn-outline {
             background: transparent;
             border: 1px solid var(--primary);
             color: var(--primary);
-        }}
-        .btn-small {{ padding: 5px 10px; font-size: 0.8rem; }}
-        .btn-danger {{ background: #dc3545; }}
-        .btn-success {{ background: #28a745; }}
-        .container {{ max-width: 700px; margin: 20px auto; padding: 0 15px; }}
-        .card {{
+        }
+        .btn-small { padding: 5px 10px; font-size: 0.8rem; }
+        .btn-danger { background: #dc3545; }
+        .btn-success { background: #28a745; }
+        .container { max-width: 700px; margin: 20px auto; padding: 0 15px; }
+        .card {
             background: var(--card-bg);
             border-radius: var(--radius);
             padding: 24px;
             margin-bottom: 16px;
             box-shadow: var(--shadow);
             border: 1px solid var(--border);
-        }}
-        .card-header {{
+        }
+        .card-header {
             font-size: 1.2rem;
             font-weight: 600;
             margin-bottom: 15px;
             border-bottom: 1px solid var(--border);
             padding-bottom: 10px;
-        }}
-        label {{ display: block; margin-top: 15px; font-weight: 500; }}
-        input, textarea, select {{
+        }
+        label { display: block; margin-top: 15px; font-weight: 500; }
+        input, textarea, select {
             width: 100%;
             padding: 10px 12px;
             margin-top: 5px;
             border-radius: 6px;
             border: 1px solid var(--border);
             font-size: 0.95rem;
-        }}
-        .alert {{ padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; }}
-        .alert-success {{ background: #d4edda; color: #155724; }}
-        .alert-error {{ background: #f8d7da; color: #721c24; }}
-        footer {{ text-align: center; color: var(--text-secondary); padding: 30px 0; font-size: 0.9rem; }}
-        table {{ width: 100%; border-collapse: collapse; }}
-        th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }}
-        .stat-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }}
-        .voucher-code {{
+        }
+        .alert { padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-error { background: #f8d7da; color: #721c24; }
+        footer { text-align: center; color: var(--text-secondary); padding: 30px 0; font-size: 0.9rem; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+        .voucher-code {
             font-size: 1.5rem;
             font-weight: 700;
             letter-spacing: 1px;
@@ -295,11 +322,19 @@ base_template = """
             border-radius: 8px;
             display: inline-block;
             margin: 10px 0;
-        }}
-        @media (max-width: 600px) {{
-            .navbar {{ flex-direction: column; gap: 10px; }}
-        }}
+        }
+        .platform-revenue {
+            background: #e8f0fe;
+            border-left: 4px solid var(--primary);
+            padding: 10px 15px;
+            margin: 10px 0;
+            border-radius: 6px;
+        }
+        @media (max-width: 600px) {
+            .navbar { flex-direction: column; gap: 10px; }
+        }
     </style>
+    {% endraw %}
 </head>
 <body>
     <nav class="navbar">
@@ -491,7 +526,7 @@ def sms_verify():
     return render_page("Verify Payment", content, pending_count)
 
 # ------------------------------------------------------------
-# ADMIN ROUTES (with auto-approve toggle)
+# ADMIN ROUTES
 # ------------------------------------------------------------
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -545,6 +580,9 @@ def dashboard():
     auto_approve = get_auto_approve()
     auto_status = "ON" if auto_approve else "OFF"
     auto_color = "#28a745" if auto_approve else "#dc3545"
+
+    # Weekly platform revenue (RockabyTech's 5%)
+    weekly_fee, week_start, week_end = get_weekly_platform_revenue()
     conn.close()
 
     content = f"""
@@ -559,6 +597,9 @@ def dashboard():
             <div class="card" style="text-align:center;"><h3>UGX {sms_rev or 0:,}</h3><small>SMS Revenue Today</small></div>
             <div class="card" style="text-align:center;"><h3>UGX {cash_rev or 0:,}</h3><small>Cash Revenue Today</small></div>
             <div class="card" style="text-align:center;"><h3>{pending}</h3><small>Pending Approvals</small></div>
+        </div>
+        <div class="platform-revenue">
+            <strong>RockabyTech Platform Fee (5% this week):</strong> UGX {weekly_fee:,} &nbsp; <small>({week_start.strftime('%d %b')} - {week_end.strftime('%d %b')})</small>
         </div>
         <div class="card">
             <div class="card-header">Quick Actions</div>
@@ -716,6 +757,7 @@ def stats():
     plan_stats = c.fetchall()
 
     pending_count = get_pending_count()
+    weekly_fee, week_start, week_end = get_weekly_platform_revenue()
 
     # Revenue last 7 days
     c.execute("""SELECT date(created_at) as day, COALESCE(SUM(amount),0) FROM voucher_requests
@@ -753,6 +795,9 @@ def stats():
             <div class="card" style="text-align:center;"><h3>{used_count}</h3><small>Vouchers Used</small></div>
             <div class="card" style="text-align:center;"><h3>{unused_count}</h3><small>Vouchers Unused</small></div>
             <div class="card" style="text-align:center;"><h3>{pending_count}</h3><small>Pending</small></div>
+        </div>
+        <div class="platform-revenue">
+            <strong>RockabyTech Platform Fee (5% this week):</strong> UGX {weekly_fee:,} &nbsp; <small>({week_start.strftime('%d %b')} - {week_end.strftime('%d %b')})</small>
         </div>
         <div class="card">
             <div class="card-header">Revenue Last 7 Days (SMS + Cash)</div>
