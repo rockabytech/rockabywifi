@@ -105,10 +105,8 @@ def init_db():
         hashed = generate_password_hash('admin123')
         c.execute("INSERT INTO providers (id, business_name, contact, password_hash, subscription_expiry, is_active) VALUES (1, ?, ?, ?, ?, ?)",
                   ('RockabyWiFi Admin', '256787654321', hashed, date.today() + timedelta(days=3650), 1))
-        # Default plans
         for name, mins, price in [('1 Hour', 60, 1000), ('3 Hours', 180, 2500), ('1 Day', 1440, 5000), ('1 Week', 10080, 20000)]:
             c.execute("INSERT INTO plans (provider_id, name, duration_minutes, price_ugx) VALUES (1, ?, ?, ?)", (name, mins, price))
-        # Default settings
         c.execute("INSERT INTO settings (provider_id, key, value) VALUES (1, 'auto_approve', '1')")
 
     conn.commit()
@@ -176,54 +174,55 @@ base_template = """
     <title>RockabyWiFi – {title}</title>
     {% raw %}
     <style>
-        :root {
+        :root {{
             --primary: #1a73e8; --primary-dark: #1557b0;
             --bg: #f0f4f8; --card-bg: #ffffff; --text: #1a1a1a;
             --text-secondary: #666666; --border: #e0e0e0;
             --radius: 12px; --shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body {
+        }}
+        * {{ margin:0; padding:0; box-sizing:border-box; }}
+        body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg); color: var(--text); min-height: 100vh;
-        }
-        .navbar {
+        }}
+        .navbar {{
             background: var(--card-bg); box-shadow: 0 1px 3px rgba(0,0,0,0.08);
             padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
-        }
-        .navbar .logo { font-size: 1.3rem; font-weight: 700; color: var(--primary); text-decoration: none; }
-        .nav-links { display: flex; gap: 15px; flex-wrap: wrap; }
-        .nav-links a { color: var(--text-secondary); text-decoration: none; font-weight: 500; }
-        .nav-links a:hover { color: var(--primary); }
-        .btn {
+        }}
+        .navbar .logo {{ font-size: 1.3rem; font-weight: 700; color: var(--primary); text-decoration: none; }}
+        .nav-links {{ display: flex; gap: 15px; flex-wrap: wrap; }}
+        .nav-links a {{ color: var(--text-secondary); text-decoration: none; font-weight: 500; }}
+        .nav-links a:hover {{ color: var(--primary); }}
+        .btn {{
             display: inline-block; padding: 10px 20px; background: var(--primary);
             color: #fff; border: none; border-radius: 6px; font-weight: 600;
             cursor: pointer; text-decoration: none;
-        }
-        .btn:hover { background: var(--primary-dark); }
-        .btn-outline { background: transparent; border: 1px solid var(--primary); color: var(--primary); }
-        .btn-small { padding: 5px 10px; font-size: 0.8rem; }
-        .btn-danger { background: #dc3545; }
-        .container { max-width: 700px; margin: 20px auto; padding: 0 15px; }
-        .card {
+        }}
+        .btn:hover {{ background: var(--primary-dark); }}
+        .btn-outline {{ background: transparent; border: 1px solid var(--primary); color: var(--primary); }}
+        .btn-small {{ padding: 5px 10px; font-size: 0.8rem; }}
+        .btn-danger {{ background: #dc3545; }}
+        .btn-success {{ background: #28a745; }}
+        .container {{ max-width: 700px; margin: 20px auto; padding: 0 15px; }}
+        .card {{
             background: var(--card-bg); border-radius: var(--radius); padding: 24px;
             margin-bottom: 16px; box-shadow: var(--shadow); border: 1px solid var(--border);
-        }
-        .card-header { font-size: 1.2rem; font-weight: 600; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
-        label { display: block; margin-top: 15px; font-weight: 500; }
-        input, textarea, select {
+        }}
+        .card-header {{ font-size: 1.2rem; font-weight: 600; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }}
+        label {{ display: block; margin-top: 15px; font-weight: 500; }}
+        input, textarea, select {{
             width: 100%; padding: 10px 12px; margin-top: 5px; border-radius: 6px;
             border: 1px solid var(--border); font-size: 0.95rem;
-        }
-        .alert { padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; }
-        .alert-success { background: #d4edda; color: #155724; }
-        .alert-error { background: #f8d7da; color: #721c24; }
-        footer { text-align: center; color: var(--text-secondary); padding: 30px 0; font-size: 0.9rem; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }
-        @media (max-width: 600px) {
-            .navbar { flex-direction: column; gap: 10px; }
-        }
+        }}
+        .alert {{ padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; }}
+        .alert-success {{ background: #d4edda; color: #155724; }}
+        .alert-error {{ background: #f8d7da; color: #721c24; }}
+        footer {{ text-align: center; color: var(--text-secondary); padding: 30px 0; font-size: 0.9rem; }}
+        table {{ width: 100%; border-collapse: collapse; }}
+        th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }}
+        @media (max-width: 600px) {{
+            .navbar {{ flex-direction: column; gap: 10px; }}
+        }}
     </style>
     {% endraw %}
 </head>
@@ -233,6 +232,9 @@ base_template = """
         <div class="nav-links">
             {% if session.provider_id %}
                 <a href="/dashboard">Dashboard</a>
+                <a href="/pending">Pending ({pending_count})</a>
+                <a href="/generate-cash">Cash Voucher</a>
+                <a href="/stats">Statistics</a>
                 <a href="/logout">Logout</a>
             {% else %}
                 <a href="/login">Admin Login</a>
@@ -271,7 +273,7 @@ def home():
                 <button type="submit" class="btn" style="margin-top:20px; width:100%;">Continue to Payment</button>
             </form>
         </div>
-    """))
+    """).replace("{pending_count}", "0"))
 
 @app.route('/sms-verify', methods=['GET', 'POST'])
 def sms_verify():
@@ -312,7 +314,18 @@ def sms_verify():
                         <button type="submit" class="btn" style="margin-top:20px; width:100%;">Verify Payment</button>
                     </form>
                 </div>
-            """))
+            """).replace("{pending_count}", "0"))
+
+        # Check if transaction ID already used
+        c = sqlite3.connect('rockabywifi.db').cursor()
+        c.execute("SELECT COUNT(*) FROM voucher_requests WHERE transaction_id=?", (parsed['tid'],))
+        if c.fetchone()[0] > 0:
+            return render_template_string(base_template.replace("{title}", "Verify Payment").replace("{content}", """
+                <div class="card">
+                    <div class="alert alert-error">This Transaction ID has already been used.</div>
+                    <p><a href="/" class="btn">Back to Home</a></p>
+                </div>
+            """).replace("{pending_count}", "0"))
 
         # Save request
         conn = sqlite3.connect('rockabywifi.db')
@@ -325,10 +338,10 @@ def sms_verify():
 
         return render_template_string(base_template.replace("{title}", "Verification Submitted").replace("{content}", """
             <div class="card">
-                <div class="alert alert-success">Payment submitted! If auto-approval is on and your SMS is valid, your voucher will be ready shortly. Otherwise, wait for manual approval.</div>
+                <div class="alert alert-success">Payment submitted! If auto-approval is on, your voucher will be ready below. Otherwise, wait for manual approval.</div>
                 <p><a href="/" class="btn">Back to Home</a></p>
             </div>
-        """))
+        """).replace("{pending_count}", "0"))
 
     return render_template_string(base_template.replace("{title}", "Verify Payment").replace("{content}", f"""
         <div class="card">
@@ -347,7 +360,7 @@ def sms_verify():
                 <button type="submit" class="btn" style="margin-top:20px; width:100%;">Verify Payment</button>
             </form>
         </div>
-    """))
+    """).replace("{pending_count}", "0"))
 
 # ------------------------------------------------------------
 # ADMIN ROUTES
@@ -378,7 +391,7 @@ def login():
                 <button type="submit" class="btn" style="margin-top:20px; width:100%;">Login</button>
             </form>
         </div>
-    """))
+    """).replace("{pending_count}", "0"))
 
 @app.route('/logout')
 def logout():
@@ -414,38 +427,202 @@ def dashboard():
             <a href="/generate-cash" class="btn" style="margin:5px;">Generate Cash Voucher</a>
             <a href="/stats" class="btn btn-outline" style="margin:5px;">Full Statistics</a>
         </div>
-    """))
+    """).replace("{pending_count}", str(pending)))
 
-# Placeholder routes for future completion
 @app.route('/pending')
 @login_required
 def pending():
-    return "Pending approvals page – coming next."
+    provider_id = session['provider_id']
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("""SELECT vr.id, vr.phone_number, pl.name, vr.amount, vr.transaction_id, vr.recipient, vr.created_at, vr.raw_sms
+                 FROM voucher_requests vr JOIN plans pl ON vr.plan_id = pl.id
+                 WHERE vr.provider_id=? AND vr.status='pending' ORDER BY vr.created_at DESC""", (provider_id,))
+    pending_list = c.fetchall()
+    conn.close()
+
+    rows = ""
+    for req in pending_list:
+        rid, phone, plan_name, amount, tid, recipient, created, raw_sms = req
+        rows += f"""
+        <tr>
+            <td>{phone}</td>
+            <td>{plan_name}</td>
+            <td>UGX {amount:,}</td>
+            <td>{tid}</td>
+            <td>{created[:16] if created else ''}</td>
+            <td>
+                <a href="/approve/{rid}" class="btn btn-small btn-success">Approve</a>
+                <a href="/reject/{rid}" class="btn btn-small btn-danger">Reject</a>
+            </td>
+        </tr>"""
+    if not rows:
+        rows = "<tr><td colspan='6'>No pending requests.</td></tr>"
+
+    return render_template_string(base_template.replace("{title}", "Pending Approvals").replace("{content}", f"""
+        <div class="card">
+            <div class="card-header">Pending Approvals</div>
+            <table>
+                <tr><th>Phone</th><th>Plan</th><th>Amount</th><th>Transaction ID</th><th>Time</th><th>Action</th></tr>
+                {rows}
+            </table>
+        </div>
+    """).replace("{pending_count}", str(len(pending_list))))
+
+@app.route('/approve/<int:req_id>')
+@login_required
+def approve(req_id):
+    provider_id = session['provider_id']
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("SELECT phone_number, plan_id FROM voucher_requests WHERE id=? AND provider_id=?", (req_id, provider_id))
+    req = c.fetchone()
+    if req:
+        code = generate_voucher_code()
+        c.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (?, ?, ?, 'sms', ?)",
+                  (provider_id, code, req[1], req[0]))
+        c.execute("UPDATE voucher_requests SET status='approved', voucher_code=? WHERE id=?", (code, req_id))
+        conn.commit()
+    conn.close()
+    return redirect('/pending')
+
+@app.route('/reject/<int:req_id>')
+@login_required
+def reject(req_id):
+    provider_id = session['provider_id']
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("UPDATE voucher_requests SET status='rejected' WHERE id=? AND provider_id=?", (req_id, provider_id))
+    conn.commit()
+    conn.close()
+    return redirect('/pending')
 
 @app.route('/generate-cash', methods=['GET', 'POST'])
 @login_required
 def generate_cash():
+    provider_id = session['provider_id']
     if request.method == 'POST':
-        return "Cash voucher generated – full logic coming next."
-    return render_template_string(base_template.replace("{title}", "Generate Cash Voucher").replace("{content}", """
+        plan_id = int(request.form['plan_id'])
+        phone = request.form.get('phone', '').strip()
+        code = generate_voucher_code()
+        conn = sqlite3.connect('rockabywifi.db')
+        c = conn.cursor()
+        c.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (?, ?, ?, 'cash', ?)",
+                  (provider_id, code, plan_id, phone))
+        conn.commit()
+        conn.close()
+        return render_template_string(base_template.replace("{title}", "Voucher Generated").replace("{content}", f"""
+            <div class="card">
+                <div class="alert alert-success">Cash voucher generated successfully!</div>
+                <p><strong>Voucher Code:</strong> <span style="font-size:1.5rem; font-weight:700;">{code}</span></p>
+                <p>Give this code to the customer.</p>
+                <a href="/generate-cash" class="btn">Generate Another</a>
+                <a href="/dashboard" class="btn btn-outline">Dashboard</a>
+            </div>
+        """).replace("{pending_count}", "0"))
+
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM voucher_requests WHERE provider_id=? AND status='pending'", (provider_id,))
+    pending_count = c.fetchone()[0]
+    conn.close()
+
+    return render_template_string(base_template.replace("{title}", "Generate Cash Voucher").replace("{content}", f"""
         <div class="card">
             <div class="card-header">Generate Cash Voucher</div>
             <form method="POST">
                 <label>Select Plan</label>
                 <select name="plan_id" required>
-                    """ + get_plan_options(session['provider_id']) + """
+                    {get_plan_options(provider_id)}
                 </select>
                 <label>Customer Phone Number (optional)</label>
                 <input type="tel" name="phone">
                 <button type="submit" class="btn" style="margin-top:20px; width:100%;">Generate Voucher</button>
             </form>
         </div>
-    """))
+    """).replace("{pending_count}", str(pending_count)))
 
 @app.route('/stats')
 @login_required
 def stats():
-    return "Full statistics page – coming next."
+    provider_id = session['provider_id']
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+
+    today = date.today().isoformat()
+    c.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at)=?", (provider_id, today))
+    sms_count, sms_rev = c.fetchone()
+    c.execute("SELECT COUNT(*), COALESCE(SUM(plans.price_ugx),0) FROM vouchers v JOIN plans ON v.plan_id=plans.id WHERE v.provider_id=? AND v.payment_method='cash' AND date(v.created_at)=?", (provider_id, today))
+    cash_count, cash_rev = c.fetchone()
+
+    c.execute("SELECT COUNT(*) FROM vouchers WHERE provider_id=? AND used=1", (provider_id,))
+    used_count = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM vouchers WHERE provider_id=? AND used=0", (provider_id,))
+    unused_count = c.fetchone()[0]
+
+    c.execute("SELECT p.name, COUNT(*) FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? GROUP BY p.name ORDER BY COUNT(*) DESC", (provider_id,))
+    plan_stats = c.fetchall()
+
+    c.execute("SELECT COUNT(*) FROM voucher_requests WHERE provider_id=? AND status='pending'", (provider_id,))
+    pending_count = c.fetchone()[0]
+
+    # Revenue last 7 days
+    c.execute("""SELECT date(created_at) as day, COALESCE(SUM(amount),0) FROM voucher_requests
+                 WHERE provider_id=? AND status='approved' AND created_at >= date('now', '-7 days')
+                 GROUP BY day ORDER BY day""", (provider_id,))
+    sms_daily = dict(c.fetchall())
+    c.execute("""SELECT date(v.created_at) as day, COALESCE(SUM(pl.price_ugx),0) FROM vouchers v JOIN plans pl ON v.plan_id=pl.id
+                 WHERE v.provider_id=? AND v.payment_method='cash' AND v.created_at >= date('now', '-7 days')
+                 GROUP BY day ORDER BY day""", (provider_id,))
+    cash_daily = dict(c.fetchall())
+
+    last_7 = [(date.today() - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    bar_html = ""
+    for d in last_7:
+        sms = sms_daily.get(d, 0)
+        cash = cash_daily.get(d, 0)
+        total = sms + cash
+        bar_html += f"""
+        <div style="display:flex; align-items:center; margin:4px 0; font-size:0.8rem;">
+            <div style="width:60px;">{d[5:]}</div>
+            <div style="flex:1; background:#eee; height:20px; border-radius:4px;">
+                <div style="width:{min(total/100, 100)}%; background:var(--primary); height:100%; border-radius:4px;"></div>
+            </div>
+            <div style="width:70px; text-align:right;">UGX {total:,}</div>
+        </div>"""
+
+    conn.close()
+
+    return render_template_string(base_template.replace("{title}", "Statistics").replace("{content}", f"""
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:10px;">
+            <div class="card" style="text-align:center;"><h3>UGX {sms_rev or 0:,}</h3><small>SMS Revenue Today</small></div>
+            <div class="card" style="text-align:center;"><h3>UGX {cash_rev or 0:,}</h3><small>Cash Revenue Today</small></div>
+            <div class="card" style="text-align:center;"><h3>{used_count}</h3><small>Vouchers Used</small></div>
+            <div class="card" style="text-align:center;"><h3>{unused_count}</h3><small>Vouchers Unused</small></div>
+            <div class="card" style="text-align:center;"><h3>{pending_count}</h3><small>Pending</small></div>
+        </div>
+        <div class="card">
+            <div class="card-header">Revenue Last 7 Days (SMS + Cash)</div>
+            {bar_html}
+        </div>
+        <div class="card">
+            <div class="card-header">Top Selling Plans</div>
+            <table>
+                <tr><th>Plan</th><th>Sold</th></tr>
+                {''.join(f'<tr><td>{p[0]}</td><td>{p[1]}</td></tr>' for p in plan_stats) or '<tr><td colspan="2">No sales yet.</td></tr>'}
+            </table>
+        </div>
+        <a href="/dashboard" class="btn btn-outline">Back to Dashboard</a>
+    """).replace("{pending_count}", str(pending_count)))
+
+# Reset DB route (temporary - remove after use)
+@app.route('/reset-db')
+def reset_db():
+    try:
+        os.remove('rockabywifi.db')
+        return "Database deleted. <a href='/'>Go to Home</a> to recreate."
+    except:
+        return "Database not found. <a href='/'>Go to Home</a>"
 
 init_db()
 
