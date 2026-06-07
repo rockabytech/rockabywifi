@@ -397,6 +397,7 @@ base_template = """
     {% endraw %}
 </head>
 <body>
+<nav class="navbar">
    <a href="/" class="logo" style="display:flex; align-items:center; gap:8px;">
     <img src="/static/icon-192.png" alt="RockabyTech" style="height:32px; width:32px; border-radius:6px;">
     ROCKABY<span style="color:var(--primary-dark);">TECH</span>
