@@ -91,6 +91,15 @@ def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
 
+     # Settings table (MUST be created before inserting)
+    c.execute('''CREATE TABLE IF NOT EXISTS settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider_id INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT,
+        FOREIGN KEY(provider_id) REFERENCES providers(id)
+    )''')
+
     # Default super admin
     c.execute("SELECT COUNT(*) FROM providers WHERE id=1")
     if c.fetchone()[0] == 0:
@@ -102,8 +111,6 @@ def init_db():
             c.execute("INSERT INTO plans (provider_id, name, duration_minutes, price_ugx) VALUES (1, ?, ?, ?)", (name, mins, price))
         # Default settings
         c.execute("INSERT INTO settings (provider_id, key, value) VALUES (1, 'auto_approve', '1')")
-    conn.commit()
-    conn.close()
 
 # ------------------------------------------------------------
 # HELPERS
