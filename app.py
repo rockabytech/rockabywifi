@@ -1,6 +1,5 @@
 import os, sqlite3, re, random, string
-from datetime import date, timedelta, datetime
-from collections import defaultdict
+from datetime import date, timedelta
 from flask import Flask, render_template_string, request, redirect, url_for, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
@@ -9,7 +8,7 @@ app = Flask(__name__)
 app.secret_key = 'rockabywifi-secret-key-change-in-production'
 
 # ------------------------------------------------------------
-# DATABASE SETUP
+# DATABASE
 # ------------------------------------------------------------
 def init_db():
     conn = sqlite3.connect('rockabywifi.db')
@@ -99,16 +98,15 @@ def init_db():
         FOREIGN KEY(provider_id) REFERENCES providers(id)
     )''')
 
-    # Create default admin if not exists
+    # Default admin
     c.execute("SELECT COUNT(*) FROM providers WHERE id=1")
     if c.fetchone()[0] == 0:
         hashed = generate_password_hash('admin123')
-        c.execute("INSERT INTO providers (id, business_name, contact, password_hash, subscription_expiry, is_active) VALUES (1, ?, ?, ?, ?, ?)",
-                  ('RockabyWiFi Admin', '256787654321', hashed, date.today() + timedelta(days=3650), 1))
+        c.execute("INSERT INTO providers (id, business_name, contact, password_hash, subscription_expiry, is_active, mtn_number, airtel_number) VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
+                  ('RockabyWiFi Admin', '256787654321', hashed, date.today() + timedelta(days=3650), 1, '0785686404', '0751318876'))
         for name, mins, price in [('1 Hour', 60, 1000), ('3 Hours', 180, 2500), ('1 Day', 1440, 5000), ('1 Week', 10080, 20000)]:
             c.execute("INSERT INTO plans (provider_id, name, duration_minutes, price_ugx) VALUES (1, ?, ?, ?)", (name, mins, price))
         c.execute("INSERT INTO settings (provider_id, key, value) VALUES (1, 'auto_approve', '1')")
-
     conn.commit()
     conn.close()
 
@@ -170,8 +168,16 @@ def get_pending_count():
     conn.close()
     return count
 
+def get_auto_approve():
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("SELECT auto_approve FROM providers WHERE id=1")
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else 1
+
 # ------------------------------------------------------------
-# BASE TEMPLATE (FIXED CSS)
+# BASE TEMPLATE
 # ------------------------------------------------------------
 base_template = """
 <!DOCTYPE html>
@@ -181,7 +187,7 @@ base_template = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RockabyWiFi - {title}</title>
     <style>
-        :root {
+        :root {{
             --primary: #1a73e8;
             --primary-dark: #1557b0;
             --bg: #f0f4f8;
@@ -191,15 +197,15 @@ base_template = """
             --border: #e0e0e0;
             --radius: 12px;
             --shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body {
+        }}
+        * {{ margin:0; padding:0; box-sizing:border-box; }}
+        body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
-        }
-        .navbar {
+        }}
+        .navbar {{
             background: var(--card-bg);
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
             padding: 12px 20px;
@@ -207,29 +213,27 @@ base_template = """
             align-items: center;
             justify-content: space-between;
             flex-wrap: wrap;
-        }
-        .navbar .logo {
+        }}
+        .navbar .logo {{
             font-size: 1.3rem;
             font-weight: 700;
             color: var(--primary);
             text-decoration: none;
-        }
-        .nav-links {
+        }}
+        .nav-links {{
             display: flex;
             gap: 15px;
             flex-wrap: wrap;
             align-items: center;
-        }
-        .nav-links a {
+        }}
+        .nav-links a {{
             color: var(--text-secondary);
             text-decoration: none;
             font-weight: 500;
             font-size: 0.9rem;
-        }
-        .nav-links a:hover {
-            color: var(--primary);
-        }
-        .btn {
+        }}
+        .nav-links a:hover {{ color: var(--primary); }}
+        .btn {{
             display: inline-block;
             padding: 10px 20px;
             background: var(--primary);
@@ -240,77 +244,49 @@ base_template = """
             cursor: pointer;
             text-decoration: none;
             font-size: 0.9rem;
-        }
-        .btn:hover { background: var(--primary-dark); }
-        .btn-outline {
+        }}
+        .btn:hover {{ background: var(--primary-dark); }}
+        .btn-outline {{
             background: transparent;
             border: 1px solid var(--primary);
             color: var(--primary);
-        }
-        .btn-small { padding: 5px 10px; font-size: 0.8rem; }
-        .btn-danger { background: #dc3545; }
-        .btn-success { background: #28a745; }
-        .container {
-            max-width: 700px;
-            margin: 20px auto;
-            padding: 0 15px;
-        }
-        .card {
+        }}
+        .btn-small {{ padding: 5px 10px; font-size: 0.8rem; }}
+        .btn-danger {{ background: #dc3545; }}
+        .btn-success {{ background: #28a745; }}
+        .container {{ max-width: 700px; margin: 20px auto; padding: 0 15px; }}
+        .card {{
             background: var(--card-bg);
             border-radius: var(--radius);
             padding: 24px;
             margin-bottom: 16px;
             box-shadow: var(--shadow);
             border: 1px solid var(--border);
-        }
-        .card-header {
+        }}
+        .card-header {{
             font-size: 1.2rem;
             font-weight: 600;
             margin-bottom: 15px;
             border-bottom: 1px solid var(--border);
             padding-bottom: 10px;
-        }
-        label {
-            display: block;
-            margin-top: 15px;
-            font-weight: 500;
-        }
-        input, textarea, select {
+        }}
+        label {{ display: block; margin-top: 15px; font-weight: 500; }}
+        input, textarea, select {{
             width: 100%;
             padding: 10px 12px;
             margin-top: 5px;
             border-radius: 6px;
             border: 1px solid var(--border);
             font-size: 0.95rem;
-        }
-        .alert {
-            padding: 10px 15px;
-            border-radius: 6px;
-            margin-bottom: 15px;
-        }
-        .alert-success { background: #d4edda; color: #155724; }
-        .alert-error { background: #f8d7da; color: #721c24; }
-        footer {
-            text-align: center;
-            color: var(--text-secondary);
-            padding: 30px 0;
-            font-size: 0.9rem;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        th, td {
-            padding: 8px;
-            text-align: left;
-            border-bottom: 1px solid var(--border);
-        }
-        .stat-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-            gap: 10px;
-        }
-        .voucher-code {
+        }}
+        .alert {{ padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; }}
+        .alert-success {{ background: #d4edda; color: #155724; }}
+        .alert-error {{ background: #f8d7da; color: #721c24; }}
+        footer {{ text-align: center; color: var(--text-secondary); padding: 30px 0; font-size: 0.9rem; }}
+        table {{ width: 100%; border-collapse: collapse; }}
+        th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }}
+        .stat-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }}
+        .voucher-code {{
             font-size: 1.5rem;
             font-weight: 700;
             letter-spacing: 1px;
@@ -319,17 +295,17 @@ base_template = """
             border-radius: 8px;
             display: inline-block;
             margin: 10px 0;
-        }
-        @media (max-width: 600px) {
-            .navbar { flex-direction: column; gap: 10px; }
-        }
+        }}
+        @media (max-width: 600px) {{
+            .navbar {{ flex-direction: column; gap: 10px; }}
+        }}
     </style>
 </head>
 <body>
     <nav class="navbar">
         <a href="/" class="logo">&#x1F4E1; ROCKABYWIFI</a>
         <div class="nav-links">
-            """ + ('{nav_links}' if '{nav_links}' in '{content}' else '') + """
+            {nav_links}
         </div>
     </nav>
     <div class="container">
@@ -343,20 +319,13 @@ base_template = """
 """
 
 def render_page(title, content, pending_count=0):
-    """Render a page with the base template and navigation."""
-    nav = ""
     if session.get('provider_id'):
         nav = f'<a href="/dashboard">Dashboard</a> <a href="/pending">Pending ({pending_count})</a> <a href="/generate-cash">Cash Voucher</a> <a href="/stats">Statistics</a> <a href="/logout">Logout</a>'
     else:
         nav = '<a href="/login">Admin Login</a>'
-    
-    # Inject nav into base template
     page = base_template.replace('{title}', title)
+    page = page.replace('{nav_links}', nav)
     page = page.replace('{content}', content)
-    # Manually add nav links since we removed raw blocks
-    page = page.replace('''<div class="nav-links">
-            """ + ('{nav_links}' if '{nav_links}' in '{content}' else '') + """
-        </div>''', f'<div class="nav-links">{nav}</div>')
     return page
 
 # ------------------------------------------------------------
@@ -388,11 +357,18 @@ def home():
 def sms_verify():
     phone = request.args.get('phone', '')
     plan_id = request.args.get('plan_id', '1')
+    pending_count = get_pending_count()
 
     conn = sqlite3.connect('rockabywifi.db')
     c = conn.cursor()
     c.execute("SELECT id, name, duration_minutes, price_ugx FROM plans WHERE id=?", (plan_id,))
     plan = c.fetchone()
+    if not plan:
+        conn.close()
+        return "Invalid plan selected.", 400
+
+    c.execute("SELECT auto_approve, mtn_number, airtel_number FROM providers WHERE id=1")
+    provider = c.fetchone()
     conn.close()
 
     if request.method == 'POST':
@@ -410,6 +386,16 @@ def sms_verify():
             error = "Could not detect Transaction ID. Please paste the full SMS."
         elif not parsed['amount']:
             error = "Could not detect amount. Please paste the full SMS."
+        elif parsed['amount'] != plan[3]:
+            error = f"Payment amount mismatch. Expected UGX {plan[3]:,}, but SMS shows UGX {parsed['amount']:,}."
+        elif not parsed['recipient']:
+            error = "Could not detect recipient. Please paste the full SMS."
+        else:
+            recipient_clean = parsed['recipient'].lower().replace(' ', '')
+            mtn_clean = provider[1].replace(' ', '') if provider[1] else ''
+            airtel_clean = provider[2].replace(' ', '') if provider[2] else ''
+            if mtn_clean not in recipient_clean and airtel_clean not in recipient_clean:
+                error = "Payment not sent to the correct WiFi provider number."
 
         if error:
             content = f"""
@@ -424,9 +410,9 @@ def sms_verify():
                     </form>
                 </div>
             """
-            return render_page("Verify Payment", content, get_pending_count())
+            return render_page("Verify Payment", content, pending_count)
 
-        # Check if transaction ID already used
+        # Duplicate check
         conn = sqlite3.connect('rockabywifi.db')
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM voucher_requests WHERE transaction_id=?", (parsed['tid'],))
@@ -438,22 +424,51 @@ def sms_verify():
                     <p><a href="/" class="btn">Back to Home</a></p>
                 </div>
             """
-            return render_page("Verify Payment", content, get_pending_count())
-
-        # Save request
-        c.execute("""INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status)
-                     VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
-                  (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], parsed['recipient'], parsed['date']))
-        conn.commit()
+            return render_page("Verify Payment", content, pending_count)
         conn.close()
 
-        content = """
-            <div class="card">
-                <div class="alert alert-success">Payment submitted! If auto-approval is on, your voucher will be ready shortly. Otherwise, wait for manual approval.</div>
-                <p><a href="/" class="btn">Back to Home</a></p>
-            </div>
-        """
-        return render_page("Verification Submitted", content, get_pending_count())
+        auto_approve = provider[0] if provider else 1
+        status = 'approved' if auto_approve else 'pending'
+        voucher_code = None
+
+        if status == 'approved':
+            voucher_code = generate_voucher_code()
+            conn = sqlite3.connect('rockabywifi.db')
+            c = conn.cursor()
+            c.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (1, ?, ?, 'sms', ?)",
+                      (voucher_code, plan_id, phone))
+            c.execute("""INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status, voucher_code)
+                         VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'approved', ?)""",
+                      (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], parsed['recipient'], parsed['date'], voucher_code))
+            conn.commit()
+            conn.close()
+
+            content = f"""
+                <div class="card">
+                    <div class="alert alert-success">Payment verified! Your internet access is ready.</div>
+                    <p><strong>Your Voucher Code:</strong></p>
+                    <div class="voucher-code">{voucher_code}</div>
+                    <p>Use this code to connect to the WiFi network.</p>
+                    <a href="/" class="btn">Back to Home</a>
+                </div>
+            """
+        else:
+            conn = sqlite3.connect('rockabywifi.db')
+            c = conn.cursor()
+            c.execute("""INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status)
+                         VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
+                      (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], parsed['recipient'], parsed['date']))
+            conn.commit()
+            conn.close()
+
+            content = """
+                <div class="card">
+                    <div class="alert alert-success">Payment submitted! Your request is pending manual approval. You will receive a voucher shortly.</div>
+                    <p><a href="/" class="btn">Back to Home</a></p>
+                </div>
+            """
+
+        return render_page("Verification Result", content, get_pending_count())
 
     content = f"""
         <div class="card">
@@ -473,10 +488,10 @@ def sms_verify():
             </form>
         </div>
     """
-    return render_page("Verify Payment", content, get_pending_count())
+    return render_page("Verify Payment", content, pending_count)
 
 # ------------------------------------------------------------
-# ADMIN ROUTES
+# ADMIN ROUTES (with auto-approve toggle)
 # ------------------------------------------------------------
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -527,10 +542,19 @@ def dashboard():
     c.execute("SELECT COUNT(*), COALESCE(SUM(plans.price_ugx),0) FROM vouchers v JOIN plans ON v.plan_id=plans.id WHERE v.provider_id=? AND v.payment_method='cash' AND date(v.created_at)=?", (provider_id, today))
     cash_count, cash_rev = c.fetchone()
     pending = get_pending_count()
+    auto_approve = get_auto_approve()
+    auto_status = "ON" if auto_approve else "OFF"
+    auto_color = "#28a745" if auto_approve else "#dc3545"
     conn.close()
 
     content = f"""
-        <div class="card"><h2>Welcome, {session['provider_name']}</h2></div>
+        <div class="card">
+            <h2>Welcome, {session['provider_name']}</h2>
+            <div style="display:flex; align-items:center; gap:15px; margin-top:15px;">
+                <p><strong>Auto‑Approval:</strong> <span style="color:{auto_color}; font-weight:700;">{auto_status}</span></p>
+                <a href="/toggle-auto" class="btn btn-small" style="background:{'#dc3545' if auto_approve else '#28a745'};">Turn {'OFF' if auto_approve else 'ON'}</a>
+            </div>
+        </div>
         <div class="stat-grid">
             <div class="card" style="text-align:center;"><h3>UGX {sms_rev or 0:,}</h3><small>SMS Revenue Today</small></div>
             <div class="card" style="text-align:center;"><h3>UGX {cash_rev or 0:,}</h3><small>Cash Revenue Today</small></div>
@@ -544,6 +568,18 @@ def dashboard():
         </div>
     """
     return render_page("Dashboard", content, pending)
+
+@app.route('/toggle-auto')
+@login_required
+def toggle_auto():
+    current = get_auto_approve()
+    new_val = 0 if current else 1
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("UPDATE providers SET auto_approve=? WHERE id=1", (new_val,))
+    conn.commit()
+    conn.close()
+    return redirect('/dashboard')
 
 @app.route('/pending')
 @login_required
@@ -733,16 +769,7 @@ def stats():
     """
     return render_page("Statistics", content, pending_count)
 
-# Reset DB route (temporary)
-@app.route('/reset-db')
-def reset_db():
-    try:
-        os.remove('rockabywifi.db')
-        return "Database deleted. <a href='/'>Go to Home</a> to recreate."
-    except:
-        return "Database not found. <a href='/'>Go to Home</a>"
-
+# ------------------------------------------------------------
 init_db()
-
 if __name__ == '__main__':
     app.run()
