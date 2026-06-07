@@ -126,22 +126,34 @@ def parse_mtn_sms(sms):
     amount = re.search(r'UGX\s*([\d,]+)', sms)
     recipient = re.search(r'to\s+(.+?),', sms)
     date_str = re.search(r'on\s+(\d{4}-\d{2}-\d{2})', sms)
+    # Try to extract number after "to ... ," – MTN often has the number after the name
+    number_match = re.search(r'to\s+.+?[, ]+(\d{10,12})', sms)
     return {
         'tid': tid.group(1) if tid else None,
         'amount': int(amount.group(1).replace(',','')) if amount else None,
-        'recipient': recipient.group(1).strip() if recipient else None,
+        'recipient_name': recipient.group(1).strip() if recipient else None,
+        'recipient_number': number_match.group(1) if number_match else None,
         'date': date_str.group(1) if date_str else None
     }
 
 def parse_airtel_sms(sms):
     tid = re.search(r'TID\s*(\d+)', sms)
     amount = re.search(r'UGX\s*([\d,]+)', sms)
-    recipient = re.search(r'to\s+(.+?)\s+\d', sms)
+    # Airtel format: "to RECIPIENT on NUMBER"
+    recipient_match = re.search(r'to\s+(.+?)\s+on\s+(\d+)', sms, re.IGNORECASE)
+    if recipient_match:
+        recipient_name = recipient_match.group(1).strip()
+        recipient_number = recipient_match.group(2).strip()
+    else:
+        recipient_match = re.search(r'to\s+(.+?)\s+\d', sms)
+        recipient_name = recipient_match.group(1).strip() if recipient_match else None
+        recipient_number = None
     date_str = re.search(r'Date\s+(\d{2}-[A-Za-z]+-\d{4}\s+\d{2}:\d{2})', sms)
     return {
         'tid': tid.group(1) if tid else None,
         'amount': int(amount.group(1).replace(',','')) if amount else None,
-        'recipient': recipient.group(1).strip() if recipient else None,
+        'recipient_name': recipient_name,
+        'recipient_number': recipient_number,
         'date': date_str.group(1) if date_str else None
     }
 
@@ -177,16 +189,13 @@ def get_auto_approve():
     return row[0] if row else 1
 
 def get_weekly_platform_revenue():
-    """Calculate 5% of all voucher plan prices generated this week (Sun-Sat)."""
     today = date.today()
-    # Find the most recent Sunday (week start)
-    start_of_week = today - timedelta(days=today.weekday() + 1)  # weekday() 0=Mon, 6=Sun; we want Sunday
-    # If today is Sunday, start_of_week = today; else previous Sunday.
-    if today.weekday() == 6:  # Sunday
+    # Find the most recent Sunday
+    if today.weekday() == 6:
         start_of_week = today
     else:
         start_of_week = today - timedelta(days=today.weekday() + 1)
-    end_of_week = start_of_week + timedelta(days=6)  # Saturday
+    end_of_week = start_of_week + timedelta(days=6)
 
     conn = sqlite3.connect('rockabywifi.db')
     c = conn.cursor()
@@ -197,13 +206,21 @@ def get_weekly_platform_revenue():
         WHERE v.provider_id = 1
           AND date(v.created_at) BETWEEN ? AND ?
     """, (start_of_week.isoformat(), end_of_week.isoformat()))
-    total_voucher_value = c.fetchone()[0]
+    total = c.fetchone()[0]
     conn.close()
-    platform_fee = int(total_voucher_value * 0.05)
-    return platform_fee, start_of_week, end_of_week
+    return int(total * 0.05), start_of_week, end_of_week
+
+def clean_number(num):
+    """Normalise a phone number to 256XXXXXXXX format."""
+    digits = ''.join(filter(str.isdigit, num))
+    if digits.startswith('0'):
+        digits = '256' + digits[1:]
+    elif not digits.startswith('256'):
+        digits = '256' + digits
+    return digits
 
 # ------------------------------------------------------------
-# BASE TEMPLATE (fixed with {% raw %} for CSS)
+# BASE TEMPLATE
 # ------------------------------------------------------------
 base_template = """
 <!DOCTYPE html>
@@ -423,14 +440,21 @@ def sms_verify():
             error = "Could not detect amount. Please paste the full SMS."
         elif parsed['amount'] != plan[3]:
             error = f"Payment amount mismatch. Expected UGX {plan[3]:,}, but SMS shows UGX {parsed['amount']:,}."
-        elif not parsed['recipient']:
+        elif not parsed.get('recipient_name'):
             error = "Could not detect recipient. Please paste the full SMS."
         else:
-            recipient_clean = parsed['recipient'].lower().replace(' ', '')
-            mtn_clean = provider[1].replace(' ', '') if provider[1] else ''
-            airtel_clean = provider[2].replace(' ', '') if provider[2] else ''
-            if mtn_clean not in recipient_clean and airtel_clean not in recipient_clean:
-                error = "Payment not sent to the correct WiFi provider number."
+            mtn_num = clean_number(provider[1]) if provider[1] else ''
+            airtel_num = clean_number(provider[2]) if provider[2] else ''
+            sms_num = clean_number(parsed.get('recipient_number', '')) if parsed.get('recipient_number') else ''
+
+            if sms_num:
+                if sms_num != mtn_num and sms_num != airtel_num:
+                    error = "Payment not sent to the correct WiFi provider number."
+            else:
+                # fallback: check if provider number appears inside the recipient name
+                recipient_lower = parsed['recipient_name'].lower()
+                if provider[1] and provider[1] not in recipient_lower and provider[2] and provider[2] not in recipient_lower:
+                    error = "Payment not sent to the correct WiFi provider number."
 
         if error:
             content = f"""
@@ -465,6 +489,7 @@ def sms_verify():
         auto_approve = provider[0] if provider else 1
         status = 'approved' if auto_approve else 'pending'
         voucher_code = None
+        recipient_full = f"{parsed.get('recipient_name','')} {parsed.get('recipient_number','')}".strip()
 
         if status == 'approved':
             voucher_code = generate_voucher_code()
@@ -474,7 +499,7 @@ def sms_verify():
                       (voucher_code, plan_id, phone))
             c.execute("""INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status, voucher_code)
                          VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'approved', ?)""",
-                      (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], parsed['recipient'], parsed['date'], voucher_code))
+                      (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], recipient_full, parsed['date'], voucher_code))
             conn.commit()
             conn.close()
 
@@ -492,7 +517,7 @@ def sms_verify():
             c = conn.cursor()
             c.execute("""INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status)
                          VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
-                      (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], parsed['recipient'], parsed['date']))
+                      (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], recipient_full, parsed['date']))
             conn.commit()
             conn.close()
 
@@ -581,7 +606,6 @@ def dashboard():
     auto_status = "ON" if auto_approve else "OFF"
     auto_color = "#28a745" if auto_approve else "#dc3545"
 
-    # Weekly platform revenue (RockabyTech's 5%)
     weekly_fee, week_start, week_end = get_weekly_platform_revenue()
     conn.close()
 
@@ -589,7 +613,7 @@ def dashboard():
         <div class="card">
             <h2>Welcome, {session['provider_name']}</h2>
             <div style="display:flex; align-items:center; gap:15px; margin-top:15px;">
-                <p><strong>Auto‑Approval:</strong> <span style="color:{auto_color}; font-weight:700;">{auto_status}</span></p>
+                <p><strong>Auto-Approval:</strong> <span style="color:{auto_color}; font-weight:700;">{auto_status}</span></p>
                 <a href="/toggle-auto" class="btn btn-small" style="background:{'#dc3545' if auto_approve else '#28a745'};">Turn {'OFF' if auto_approve else 'ON'}</a>
             </div>
         </div>
