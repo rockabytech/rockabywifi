@@ -8,6 +8,7 @@ from functools import wraps
 app = Flask(__name__)
 app.secret_key = 'rockabywifi-secret-key-change-in-production'
 
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 UPLOAD_FOLDER = os.path.join(os.getcwd(), 'static', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -433,13 +434,14 @@ def render_page(title, content, pending_count=0, provider_id=1):
 @app.route('/')
 def home():
     provider = get_provider(1)
+    business_name = provider[1] if provider else 'RockabyWiFi'
     poster_html = ''
     if provider and provider[11]:
         poster_html = f'<img src="/static/uploads/{provider[11]}" style="width:100%; max-height:200px; object-fit:cover; border-radius:8px; margin-bottom:15px;">'
     content = f"""
         {poster_html}
         <div class="card">
-            <h2>Get Internet Access</h2>
+            <h2>{business_name}</h2>
             <p style="color:#666;">Select a plan, pay via Mobile Money, paste your SMS, and get your voucher instantly.</p>
         </div>
         <div class="card">
