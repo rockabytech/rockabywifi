@@ -34,8 +34,19 @@ def init_db():
         mtn_number TEXT,
         airtel_number TEXT,
         poster_image TEXT,
+        logo_image TEXT,
         support_phone TEXT
     )''')
+
+    # Add missing columns safely
+    c.execute("PRAGMA table_info(providers)")
+    prov_cols = [col[1] for col in c.fetchall()]
+    if 'poster_image' not in prov_cols:
+        c.execute("ALTER TABLE providers ADD COLUMN poster_image TEXT")
+    if 'logo_image' not in prov_cols:
+        c.execute("ALTER TABLE providers ADD COLUMN logo_image TEXT")
+    if 'support_phone' not in prov_cols:
+        c.execute("ALTER TABLE providers ADD COLUMN support_phone TEXT")
 
     c.execute('''CREATE TABLE IF NOT EXISTS plans (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,7 +117,7 @@ def init_db():
         FOREIGN KEY(provider_id) REFERENCES providers(id)
     )''')
 
-    # Default provider (RockabyWiFi Admin)
+    # Default provider
     c.execute("SELECT COUNT(*) FROM providers WHERE id=1")
     if c.fetchone()[0] == 0:
         hashed = generate_password_hash('admin123')
@@ -220,22 +231,18 @@ def get_weekly_platform_revenue():
     else:
         start_of_week = today - timedelta(days=today.weekday() + 1)
     end_of_week = start_of_week + timedelta(days=6)
-
     conn = sqlite3.connect('rockabywifi.db')
     c = conn.cursor()
-    c.execute("""
-        SELECT COALESCE(SUM(pl.price_ugx), 0)
-        FROM vouchers v
-        JOIN plans pl ON v.plan_id = pl.id
-        WHERE v.provider_id = 1
-          AND date(v.created_at) BETWEEN ? AND ?
-    """, (start_of_week.isoformat(), end_of_week.isoformat()))
+    c.execute("""SELECT COALESCE(SUM(pl.price_ugx), 0) FROM vouchers v
+                 JOIN plans pl ON v.plan_id = pl.id
+                 WHERE v.provider_id = 1 AND date(v.created_at) BETWEEN ? AND ?""",
+              (start_of_week.isoformat(), end_of_week.isoformat()))
     total = c.fetchone()[0]
     conn.close()
     return int(total * 0.05), start_of_week, end_of_week
 
 # ------------------------------------------------------------
-# BASE TEMPLATE (no public admin link)
+# BASE TEMPLATE (ROCKABYTECH branded)
 # ------------------------------------------------------------
 base_template = """
 <!DOCTYPE html>
@@ -243,7 +250,7 @@ base_template = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rockabywifi - {title}</title>
+    <title>RockabyWiFi - {title}</title>
     {% raw %}
     <style>
         :root {
@@ -418,13 +425,12 @@ base_template = """
 """
 
 def render_page(title, content, pending_count=0, provider_id=1):
-    """Render a page. Provider-specific: support phone and nav."""
     provider = get_provider(provider_id)
-    support_phone = provider[12] if provider and provider[12] else '256751318876'   # default support
+    support_phone = provider[14] if provider and len(provider) > 14 and provider[14] else '256751318876'
     if session.get('provider_id'):
         nav = f'<a href="/dashboard">Dashboard</a> <a href="/pending">Pending ({pending_count})</a> <a href="/generate-cash">Cash Voucher</a> <a href="/plans">Plans</a> <a href="/provider/edit">Settings</a> <a href="/logout">Logout</a>'
     else:
-        nav = ''   # no admin links for public
+        nav = ''
     page = base_template.replace('{title}', title)
     page = page.replace('{nav_links}', nav)
     page = page.replace('{content}', content)
@@ -438,13 +444,17 @@ def render_page(title, content, pending_count=0, provider_id=1):
 def home():
     provider = get_provider(1)
     business_name = provider[1] if provider else 'RockabyWiFi'
+    logo_html = ''
     poster_html = ''
-    if provider and provider[11]:
-        poster_html = f'<img src="/static/uploads/{provider[11]}" style="width:100%; max-height:200px; object-fit:cover; border-radius:8px; margin-bottom:15px;">'
+    if provider:
+        if len(provider) > 13 and provider[13]:
+            logo_html = f'<img src="/static/uploads/{provider[13]}" style="height:40px; width:40px; border-radius:8px; margin-right:10px; vertical-align:middle;">'
+        if provider[11]:
+            poster_html = f'<img src="/static/uploads/{provider[11]}" style="width:100%; max-height:200px; object-fit:cover; border-radius:8px; margin-bottom:15px;">'
     content = f"""
         {poster_html}
         <div class="card">
-            <h2>{business_name}</h2>
+            <h2>{logo_html}{business_name}</h2>
             <p style="color:#666;">Select a plan, pay via Mobile Money, paste your SMS, and get your voucher instantly.</p>
         </div>
         <div class="card">
@@ -477,7 +487,7 @@ def redeem():
             c.execute("UPDATE vouchers SET used=1, used_at=CURRENT_TIMESTAMP WHERE id=?", (voucher[0],))
             conn.commit()
             conn.close()
-            content = f"""
+            content = """
                 <div class="card">
                     <div class="alert alert-success">Connected! Enjoy your internet access.</div>
                     <a href="/" class="btn">Back to Home</a>
@@ -486,10 +496,9 @@ def redeem():
             return render_page("Voucher Redeemed", content, get_pending_count())
         else:
             conn.close()
-            error = "Invalid or already used voucher code."
-            content = f"""
+            content = """
                 <div class="card">
-                    <div class="alert alert-error">{error}</div>
+                    <div class="alert alert-error">Invalid or already used voucher code.</div>
                     <form method="POST">
                         <label>Enter Voucher Code</label>
                         <input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required>
@@ -498,7 +507,6 @@ def redeem():
                 </div>
             """
             return render_page("Redeem Voucher", content, get_pending_count())
-
     content = """
         <div class="card">
             <div class="card-header">Redeem Voucher</div>
@@ -524,7 +532,6 @@ def sms_verify():
     if not plan:
         conn.close()
         return "Invalid plan selected.", 400
-
     c.execute("SELECT auto_approve, mtn_number, airtel_number FROM providers WHERE id=1")
     provider = c.fetchone()
     conn.close()
@@ -606,7 +613,6 @@ def sms_verify():
                       (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], recipient_full, parsed['date'], voucher_code))
             conn.commit()
             conn.close()
-
             content = f"""
                 <div class="card">
                     <div class="alert alert-success">Payment verified!</div>
@@ -631,14 +637,12 @@ def sms_verify():
                       (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], recipient_full, parsed['date']))
             conn.commit()
             conn.close()
-
             content = """
                 <div class="card">
                     <div class="alert alert-success">Payment submitted! Waiting for approval.</div>
                     <p><a href="/" class="btn">Back to Home</a></p>
                 </div>
             """
-
         return render_page("Verification Result", content, get_pending_count())
 
     content = f"""
@@ -770,25 +774,12 @@ def list_plans():
         pid, name, mins, price, active = p
         status = "Active" if active else "Inactive"
         rows += f"""
-        <tr>
-            <td>{name}</td>
-            <td>{mins} min</td>
-            <td>UGX {price:,}</td>
-            <td>{status}</td>
-            <td>
-                <a href="/plans/edit/{pid}" class="btn btn-small">Edit</a>
-                <a href="/plans/delete/{pid}" class="btn btn-small btn-danger" onclick="return confirm('Delete this plan?')">Del</a>
-            </td>
-        </tr>"""
+        <tr><td>{name}</td><td>{mins} min</td><td>UGX {price:,}</td><td>{status}</td>
+        <td><a href="/plans/edit/{pid}" class="btn btn-small">Edit</a> <a href="/plans/delete/{pid}" class="btn btn-small btn-danger" onclick="return confirm('Delete?')">Del</a></td></tr>"""
     content = f"""
-        <div class="card">
-            <div class="card-header">My Plans</div>
-            <a href="/plans/add" class="btn btn-success" style="margin-bottom:15px;">+ Add Plan</a>
-            <table>
-                <tr><th>Name</th><th>Duration</th><th>Price</th><th>Status</th><th>Action</th></tr>
-                {rows or '<tr><td colspan="5">No plans yet.</td></tr>'}
-            </table>
-        </div>
+        <div class="card"><div class="card-header">My Plans</div>
+        <a href="/plans/add" class="btn btn-success" style="margin-bottom:15px;">+ Add Plan</a>
+        <table><tr><th>Name</th><th>Duration</th><th>Price</th><th>Status</th><th>Action</th></tr>{rows or '<tr><td colspan="5">No plans yet.</td></tr>'}</table></div>
     """
     return render_page("Manage Plans", content, get_pending_count())
 
@@ -807,15 +798,13 @@ def add_plan():
         conn.close()
         return redirect('/plans')
     content = """
-        <div class="card">
-            <div class="card-header">Add Plan</div>
-            <form method="POST">
-                <label>Plan Name</label><input type="text" name="name" required>
-                <label>Duration (minutes)</label><input type="number" name="duration" required>
-                <label>Price (UGX)</label><input type="number" name="price" required>
-                <button type="submit" class="btn" style="margin-top:20px;">Save</button>
-            </form>
-        </div>
+        <div class="card"><div class="card-header">Add Plan</div>
+        <form method="POST">
+            <label>Plan Name</label><input type="text" name="name" required>
+            <label>Duration (minutes)</label><input type="number" name="duration" required>
+            <label>Price (UGX)</label><input type="number" name="price" required>
+            <button type="submit" class="btn" style="margin-top:20px;">Save</button>
+        </form></div>
     """
     return render_page("Add Plan", content, get_pending_count())
 
@@ -840,20 +829,15 @@ def edit_plan(plan_id):
         conn.close()
         return redirect('/plans')
     content = f"""
-        <div class="card">
-            <div class="card-header">Edit Plan</div>
-            <form method="POST">
-                <label>Name</label><input type="text" name="name" value="{plan[0]}" required>
-                <label>Duration (min)</label><input type="number" name="duration" value="{plan[1]}" required>
-                <label>Price (UGX)</label><input type="number" name="price" value="{plan[2]}" required>
-                <label>Active</label>
-                <select name="is_active">
-                    <option value="1" {'selected' if plan[3] else ''}>Yes</option>
-                    <option value="0" {'selected' if not plan[3] else ''}>No</option>
-                </select>
-                <button type="submit" class="btn" style="margin-top:20px;">Update</button>
-            </form>
-        </div>
+        <div class="card"><div class="card-header">Edit Plan</div>
+        <form method="POST">
+            <label>Name</label><input type="text" name="name" value="{plan[0]}" required>
+            <label>Duration (min)</label><input type="number" name="duration" value="{plan[1]}" required>
+            <label>Price (UGX)</label><input type="number" name="price" value="{plan[2]}" required>
+            <label>Active</label>
+            <select name="is_active"><option value="1" {'selected' if plan[3] else ''}>Yes</option><option value="0" {'selected' if not plan[3] else ''}>No</option></select>
+            <button type="submit" class="btn" style="margin-top:20px;">Update</button>
+        </form></div>
     """
     conn.close()
     return render_page("Edit Plan", content, get_pending_count())
@@ -868,7 +852,7 @@ def delete_plan(plan_id):
     conn.close()
     return redirect('/plans')
 
-# ---- PROVIDER SETTINGS (edit poster, support phone, etc.) ----
+# ---- PROVIDER SETTINGS (logo + poster) ----
 @app.route('/provider/edit', methods=['GET', 'POST'])
 @login_required
 def edit_provider():
@@ -876,20 +860,29 @@ def edit_provider():
     if request.method == 'POST':
         business_name = request.form['business_name']
         support_phone = request.form['support_phone']
-        file = request.files.get('poster')
-        filename = provider[11]  # keep old poster
 
-        if file and allowed_file(file.filename):
-            # Recreate the uploads folder in case Render wiped it
+        # Poster
+        poster_file = request.files.get('poster')
+        poster_filename = provider[11] if provider and len(provider) > 11 else None
+        if poster_file and allowed_file(poster_file.filename):
             upload_path = os.path.join(os.getcwd(), 'static', 'uploads')
             os.makedirs(upload_path, exist_ok=True)
-            filename = secure_filename(file.filename)
-            file.save(os.path.join(upload_path, filename))
+            poster_filename = secure_filename(poster_file.filename)
+            poster_file.save(os.path.join(upload_path, poster_filename))
+
+        # Logo
+        logo_file = request.files.get('logo')
+        logo_filename = provider[13] if provider and len(provider) > 13 else None
+        if logo_file and allowed_file(logo_file.filename):
+            upload_path = os.path.join(os.getcwd(), 'static', 'uploads')
+            os.makedirs(upload_path, exist_ok=True)
+            logo_filename = secure_filename(logo_file.filename)
+            logo_file.save(os.path.join(upload_path, logo_filename))
 
         conn = sqlite3.connect('rockabywifi.db')
         c = conn.cursor()
-        c.execute("UPDATE providers SET business_name=?, support_phone=?, poster_image=? WHERE id=?",
-                  (business_name, support_phone, filename, session['provider_id']))
+        c.execute("UPDATE providers SET business_name=?, support_phone=?, poster_image=?, logo_image=? WHERE id=?",
+                  (business_name, support_phone, poster_filename, logo_filename, session['provider_id']))
         conn.commit()
         conn.close()
         session['provider_name'] = business_name
@@ -902,16 +895,20 @@ def edit_provider():
                 <label>Business Name</label>
                 <input type="text" name="business_name" value="{provider[1]}" required>
                 <label>Support WhatsApp (e.g., 256751318876)</label>
-                <input type="text" name="support_phone" value="{provider[12] or ''}">
-                <label>Portal Poster/Logo</label>
+                <input type="text" name="support_phone" value="{provider[14] if len(provider) > 14 else ''}">
+                <label>Portal Poster/Banner</label>
                 <input type="file" name="poster" accept="image/*">
-                {'<p>Current: <img src="/static/uploads/' + provider[11] + '" style="max-width:200px; border-radius:8px;"></p>' if provider[11] else ''}
+                {'<p>Current poster: <img src="/static/uploads/' + provider[11] + '" style="max-width:200px; border-radius:8px;"></p>' if provider[11] else ''}
+                <label>Business Logo</label>
+                <input type="file" name="logo" accept="image/*">
+                {'<p>Current logo: <img src="/static/uploads/' + provider[13] + '" style="max-width:100px; border-radius:8px;"></p>' if len(provider) > 13 and provider[13] else ''}
                 <button type="submit" class="btn" style="margin-top:20px;">Save Settings</button>
             </form>
         </div>
     """
     return render_page("Settings", content, get_pending_count())
 
+# ---- PENDING, APPROVE, REJECT, CASH, STATS (unchanged from previous) ----
 @app.route('/pending')
 @login_required
 def pending():
@@ -923,34 +920,15 @@ def pending():
                  WHERE vr.provider_id=? AND vr.status='pending' ORDER BY vr.created_at DESC""", (provider_id,))
     pending_list = c.fetchall()
     conn.close()
-
     rows = ""
     for req in pending_list:
         rid, phone, plan_name, amount, tid, created = req
-        rows += f"""
-        <tr>
-            <td>{phone}</td>
-            <td>{plan_name}</td>
-            <td>UGX {amount or 0:,}</td>
-            <td>{tid}</td>
-            <td>{str(created)[:16] if created else ''}</td>
-            <td>
-                <a href="/approve/{rid}" class="btn btn-small btn-success">Approve</a>
-                <a href="/reject/{rid}" class="btn btn-small btn-danger">Reject</a>
-            </td>
-        </tr>"""
+        rows += f"""<tr><td>{phone}</td><td>{plan_name}</td><td>UGX {amount or 0:,}</td><td>{tid}</td><td>{str(created)[:16] if created else ''}</td>
+        <td><a href="/approve/{rid}" class="btn btn-small btn-success">Approve</a> <a href="/reject/{rid}" class="btn btn-small btn-danger">Reject</a></td></tr>"""
     if not rows:
         rows = "<tr><td colspan='6'>No pending requests.</td></tr>"
-
-    content = f"""
-        <div class="card">
-            <div class="card-header">Pending Approvals</div>
-            <table>
-                <tr><th>Phone</th><th>Plan</th><th>Amount</th><th>Transaction ID</th><th>Time</th><th>Action</th></tr>
-                {rows}
-            </table>
-        </div>
-    """
+    content = f"""<div class="card"><div class="card-header">Pending Approvals</div>
+    <table><tr><th>Phone</th><th>Plan</th><th>Amount</th><th>Transaction ID</th><th>Time</th><th>Action</th></tr>{rows}</table></div>"""
     return render_page("Pending Approvals", content, len(pending_list))
 
 @app.route('/approve/<int:req_id>')
@@ -986,7 +964,6 @@ def reject(req_id):
 def generate_cash():
     provider_id = session['provider_id']
     pending_count = get_pending_count()
-
     if request.method == 'POST':
         plan_id = int(request.form['plan_id'])
         phone = request.form.get('phone', '').strip()
@@ -997,32 +974,15 @@ def generate_cash():
                   (provider_id, code, plan_id, phone))
         conn.commit()
         conn.close()
-        content = f"""
-            <div class="card">
-                <div class="alert alert-success">Cash voucher generated!</div>
-                <p><strong>Voucher Code:</strong></p>
-                <div class="voucher-code">{code}</div>
-                <p>Give this code to the customer.</p>
-                <a href="/generate-cash" class="btn">Generate Another</a>
-                <a href="/dashboard" class="btn btn-outline">Dashboard</a>
-            </div>
-        """
+        content = f"""<div class="card"><div class="alert alert-success">Cash voucher generated!</div>
+        <p><strong>Voucher Code:</strong></p><div class="voucher-code">{code}</div>
+        <p>Give this code to the customer.</p>
+        <a href="/generate-cash" class="btn">Generate Another</a> <a href="/dashboard" class="btn btn-outline">Dashboard</a></div>"""
         return render_page("Voucher Generated", content, pending_count)
-
-    content = f"""
-        <div class="card">
-            <div class="card-header">Generate Cash Voucher</div>
-            <form method="POST">
-                <label>Select Plan</label>
-                <select name="plan_id" required>
-                    {get_plan_options(provider_id)}
-                </select>
-                <label>Customer Phone (optional)</label>
-                <input type="tel" name="phone">
-                <button type="submit" class="btn" style="margin-top:20px; width:100%;">Generate</button>
-            </form>
-        </div>
-    """
+    content = f"""<div class="card"><div class="card-header">Generate Cash Voucher</div>
+    <form method="POST"><label>Select Plan</label><select name="plan_id" required>{get_plan_options(provider_id)}</select>
+    <label>Customer Phone (optional)</label><input type="tel" name="phone">
+    <button type="submit" class="btn" style="margin-top:20px; width:100%;">Generate</button></form></div>"""
     return render_page("Generate Cash Voucher", content, pending_count)
 
 @app.route('/stats')
@@ -1036,28 +996,21 @@ def stats():
     sms_count, sms_rev = c.fetchone()
     c.execute("SELECT COUNT(*), COALESCE(SUM(plans.price_ugx),0) FROM vouchers v JOIN plans ON v.plan_id=plans.id WHERE v.provider_id=? AND v.payment_method='cash' AND date(v.created_at)=?", (provider_id, today))
     cash_count, cash_rev = c.fetchone()
-
     c.execute("SELECT COUNT(*) FROM vouchers WHERE provider_id=? AND used=1", (provider_id,))
     used_count = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM vouchers WHERE provider_id=? AND used=0", (provider_id,))
     unused_count = c.fetchone()[0]
-
     c.execute("SELECT p.name, COUNT(*) FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? GROUP BY p.name ORDER BY COUNT(*) DESC", (provider_id,))
     plan_stats = c.fetchall()
-
     pending_count = get_pending_count()
     weekly_fee, week_start, week_end = get_weekly_platform_revenue()
 
-    # Revenue last 7 days
     c.execute("""SELECT date(created_at) as day, COALESCE(SUM(amount),0) FROM voucher_requests
-                 WHERE provider_id=? AND status='approved' AND created_at >= date('now', '-7 days')
-                 GROUP BY day ORDER BY day""", (provider_id,))
+                 WHERE provider_id=? AND status='approved' AND created_at >= date('now', '-7 days') GROUP BY day ORDER BY day""", (provider_id,))
     sms_daily = dict(c.fetchall())
     c.execute("""SELECT date(v.created_at) as day, COALESCE(SUM(pl.price_ugx),0) FROM vouchers v JOIN plans pl ON v.plan_id=pl.id
-                 WHERE v.provider_id=? AND v.payment_method='cash' AND v.created_at >= date('now', '-7 days')
-                 GROUP BY day ORDER BY day""", (provider_id,))
+                 WHERE v.provider_id=? AND v.payment_method='cash' AND v.created_at >= date('now', '-7 days') GROUP BY day ORDER BY day""", (provider_id,))
     cash_daily = dict(c.fetchall())
-
     last_7 = [(date.today() - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
     max_rev = max([sms_daily.get(d,0) + cash_daily.get(d,0) for d in last_7] + [1])
     bar_html = ""
@@ -1066,15 +1019,11 @@ def stats():
         cash = cash_daily.get(d, 0)
         total = sms + cash
         pct = int((total / max_rev) * 100) if max_rev > 0 else 0
-        bar_html += f"""
-        <div style="display:flex; align-items:center; margin:4px 0; font-size:0.8rem;">
+        bar_html += f"""<div style="display:flex; align-items:center; margin:4px 0; font-size:0.8rem;">
             <div style="width:60px;">{d[5:]}</div>
             <div style="flex:1; background:#eee; height:20px; border-radius:4px;">
-                <div style="width:{pct}%; background:var(--primary); height:100%; border-radius:4px;"></div>
-            </div>
-            <div style="width:80px; text-align:right;">UGX {total:,}</div>
-        </div>"""
-
+            <div style="width:{pct}%; background:var(--primary); height:100%; border-radius:4px;"></div></div>
+            <div style="width:80px; text-align:right;">UGX {total:,}</div></div>"""
     conn.close()
 
     content = f"""
@@ -1088,17 +1037,9 @@ def stats():
         <div class="platform-revenue">
             <strong>RockabyTech Platform Fee (5% this week):</strong> UGX {weekly_fee:,} &nbsp; <small>({week_start.strftime('%d %b')} - {week_end.strftime('%d %b')})</small>
         </div>
-        <div class="card">
-            <div class="card-header">Revenue Last 7 Days (SMS + Cash)</div>
-            {bar_html}
-        </div>
-        <div class="card">
-            <div class="card-header">Top Selling Plans</div>
-            <table>
-                <tr><th>Plan</th><th>Sold</th></tr>
-                {''.join(f'<tr><td>{p[0]}</td><td>{p[1]}</td></tr>' for p in plan_stats) or '<tr><td colspan="2">No sales yet.</td></tr>'}
-            </table>
-        </div>
+        <div class="card"><div class="card-header">Revenue Last 7 Days (SMS + Cash)</div>{bar_html}</div>
+        <div class="card"><div class="card-header">Top Selling Plans</div>
+        <table><tr><th>Plan</th><th>Sold</th></tr>{''.join(f'<tr><td>{p[0]}</td><td>{p[1]}</td></tr>' for p in plan_stats) or '<tr><td colspan="2">No sales yet.</td></tr>'}</table></div>
         <a href="/dashboard" class="btn btn-outline">Back to Dashboard</a>
     """
     return render_page("Statistics", content, pending_count)
