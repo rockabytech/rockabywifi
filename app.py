@@ -159,11 +159,19 @@ def get_plan_options(provider_id):
     conn.close()
     opts = ""
     for p in plans:
-        opts += f'<option value="{p[0]}">{p[1]} – {p[2]} min – UGX {p[3]:,}</option>'
+        opts += f'<option value="{p[0]}">{p[1]} - {p[2]} min - UGX {p[3]:,}</option>'
     return opts
 
+def get_pending_count():
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM voucher_requests WHERE provider_id=1 AND status='pending'")
+    count = c.fetchone()[0]
+    conn.close()
+    return count
+
 # ------------------------------------------------------------
-# BASE TEMPLATE
+# BASE TEMPLATE (FIXED CSS)
 # ------------------------------------------------------------
 base_template = """
 <!DOCTYPE html>
@@ -171,92 +179,192 @@ base_template = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RockabyWiFi – {title}</title>
-    {% raw %}
+    <title>RockabyWiFi - {title}</title>
     <style>
-        :root {{
-            --primary: #1a73e8; --primary-dark: #1557b0;
-            --bg: #f0f4f8; --card-bg: #ffffff; --text: #1a1a1a;
-            --text-secondary: #666666; --border: #e0e0e0;
-            --radius: 12px; --shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }}
-        * {{ margin:0; padding:0; box-sizing:border-box; }}
-        body {{
+        :root {
+            --primary: #1a73e8;
+            --primary-dark: #1557b0;
+            --bg: #f0f4f8;
+            --card-bg: #ffffff;
+            --text: #1a1a1a;
+            --text-secondary: #666666;
+            --border: #e0e0e0;
+            --radius: 12px;
+            --shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg); color: var(--text); min-height: 100vh;
-        }}
-        .navbar {{
-            background: var(--card-bg); box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
-        }}
-        .navbar .logo {{ font-size: 1.3rem; font-weight: 700; color: var(--primary); text-decoration: none; }}
-        .nav-links {{ display: flex; gap: 15px; flex-wrap: wrap; }}
-        .nav-links a {{ color: var(--text-secondary); text-decoration: none; font-weight: 500; }}
-        .nav-links a:hover {{ color: var(--primary); }}
-        .btn {{
-            display: inline-block; padding: 10px 20px; background: var(--primary);
-            color: #fff; border: none; border-radius: 6px; font-weight: 600;
-            cursor: pointer; text-decoration: none;
-        }}
-        .btn:hover {{ background: var(--primary-dark); }}
-        .btn-outline {{ background: transparent; border: 1px solid var(--primary); color: var(--primary); }}
-        .btn-small {{ padding: 5px 10px; font-size: 0.8rem; }}
-        .btn-danger {{ background: #dc3545; }}
-        .btn-success {{ background: #28a745; }}
-        .container {{ max-width: 700px; margin: 20px auto; padding: 0 15px; }}
-        .card {{
-            background: var(--card-bg); border-radius: var(--radius); padding: 24px;
-            margin-bottom: 16px; box-shadow: var(--shadow); border: 1px solid var(--border);
-        }}
-        .card-header {{ font-size: 1.2rem; font-weight: 600; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }}
-        label {{ display: block; margin-top: 15px; font-weight: 500; }}
-        input, textarea, select {{
-            width: 100%; padding: 10px 12px; margin-top: 5px; border-radius: 6px;
-            border: 1px solid var(--border); font-size: 0.95rem;
-        }}
-        .alert {{ padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; }}
-        .alert-success {{ background: #d4edda; color: #155724; }}
-        .alert-error {{ background: #f8d7da; color: #721c24; }}
-        footer {{ text-align: center; color: var(--text-secondary); padding: 30px 0; font-size: 0.9rem; }}
-        table {{ width: 100%; border-collapse: collapse; }}
-        th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }}
-        @media (max-width: 600px) {{
-            .navbar {{ flex-direction: column; gap: 10px; }}
-        }}
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .navbar {
+            background: var(--card-bg);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+        .navbar .logo {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-decoration: none;
+        }
+        .nav-links {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+        .nav-links a:hover {
+            color: var(--primary);
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .btn:hover { background: var(--primary-dark); }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+        }
+        .btn-small { padding: 5px 10px; font-size: 0.8rem; }
+        .btn-danger { background: #dc3545; }
+        .btn-success { background: #28a745; }
+        .container {
+            max-width: 700px;
+            margin: 20px auto;
+            padding: 0 15px;
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            padding: 24px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+        }
+        .card-header {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
+        }
+        label {
+            display: block;
+            margin-top: 15px;
+            font-weight: 500;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px 12px;
+            margin-top: 5px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            font-size: 0.95rem;
+        }
+        .alert {
+            padding: 10px 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-error { background: #f8d7da; color: #721c24; }
+        footer {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 30px 0;
+            font-size: 0.9rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px;
+        }
+        .voucher-code {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            background: #f0f4f8;
+            padding: 10px 15px;
+            border-radius: 8px;
+            display: inline-block;
+            margin: 10px 0;
+        }
+        @media (max-width: 600px) {
+            .navbar { flex-direction: column; gap: 10px; }
+        }
     </style>
-    {% endraw %}
 </head>
 <body>
     <nav class="navbar">
-        <a href="/" class="logo">📡 ROCKABYWIFI</a>
+        <a href="/" class="logo">&#x1F4E1; ROCKABYWIFI</a>
         <div class="nav-links">
-            {% if session.provider_id %}
-                <a href="/dashboard">Dashboard</a>
-                <a href="/pending">Pending ({pending_count})</a>
-                <a href="/generate-cash">Cash Voucher</a>
-                <a href="/stats">Statistics</a>
-                <a href="/logout">Logout</a>
-            {% else %}
-                <a href="/login">Admin Login</a>
-            {% endif %}
+            """ + ('{nav_links}' if '{nav_links}' in '{content}' else '') + """
         </div>
     </nav>
     <div class="container">
         {content}
     </div>
     <footer>
-        &copy; 2025 RockabyTech – WiFi Billing Made Simple
+        &copy; 2025 RockabyTech - WiFi Billing Made Simple
     </footer>
 </body>
 </html>
 """
+
+def render_page(title, content, pending_count=0):
+    """Render a page with the base template and navigation."""
+    nav = ""
+    if session.get('provider_id'):
+        nav = f'<a href="/dashboard">Dashboard</a> <a href="/pending">Pending ({pending_count})</a> <a href="/generate-cash">Cash Voucher</a> <a href="/stats">Statistics</a> <a href="/logout">Logout</a>'
+    else:
+        nav = '<a href="/login">Admin Login</a>'
+    
+    # Inject nav into base template
+    page = base_template.replace('{title}', title)
+    page = page.replace('{content}', content)
+    # Manually add nav links since we removed raw blocks
+    page = page.replace('''<div class="nav-links">
+            """ + ('{nav_links}' if '{nav_links}' in '{content}' else '') + """
+        </div>''', f'<div class="nav-links">{nav}</div>')
+    return page
 
 # ------------------------------------------------------------
 # CUSTOMER ROUTES
 # ------------------------------------------------------------
 @app.route('/')
 def home():
-    return render_template_string(base_template.replace("{title}", "Get Internet Access").replace("{content}", f"""
+    content = f"""
         <div class="card">
             <h2>Get Internet Access</h2>
             <p style="color:#666;">Select a plan, pay via Mobile Money, paste your SMS, and get your voucher instantly.</p>
@@ -273,7 +381,8 @@ def home():
                 <button type="submit" class="btn" style="margin-top:20px; width:100%;">Continue to Payment</button>
             </form>
         </div>
-    """).replace("{pending_count}", "0"))
+    """
+    return render_page("Get Internet Access", content, get_pending_count())
 
 @app.route('/sms-verify', methods=['GET', 'POST'])
 def sms_verify():
@@ -303,7 +412,7 @@ def sms_verify():
             error = "Could not detect amount. Please paste the full SMS."
 
         if error:
-            return render_template_string(base_template.replace("{title}", "Verify Payment").replace("{content}", f"""
+            content = f"""
                 <div class="card">
                     <div class="alert alert-error">{error}</div>
                     <form method="POST">
@@ -314,39 +423,42 @@ def sms_verify():
                         <button type="submit" class="btn" style="margin-top:20px; width:100%;">Verify Payment</button>
                     </form>
                 </div>
-            """).replace("{pending_count}", "0"))
+            """
+            return render_page("Verify Payment", content, get_pending_count())
 
         # Check if transaction ID already used
-        c = sqlite3.connect('rockabywifi.db').cursor()
+        conn = sqlite3.connect('rockabywifi.db')
+        c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM voucher_requests WHERE transaction_id=?", (parsed['tid'],))
         if c.fetchone()[0] > 0:
-            return render_template_string(base_template.replace("{title}", "Verify Payment").replace("{content}", """
+            conn.close()
+            content = """
                 <div class="card">
                     <div class="alert alert-error">This Transaction ID has already been used.</div>
                     <p><a href="/" class="btn">Back to Home</a></p>
                 </div>
-            """).replace("{pending_count}", "0"))
+            """
+            return render_page("Verify Payment", content, get_pending_count())
 
         # Save request
-        conn = sqlite3.connect('rockabywifi.db')
-        c = conn.cursor()
         c.execute("""INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status)
                      VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
                   (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], parsed['recipient'], parsed['date']))
         conn.commit()
         conn.close()
 
-        return render_template_string(base_template.replace("{title}", "Verification Submitted").replace("{content}", """
+        content = """
             <div class="card">
-                <div class="alert alert-success">Payment submitted! If auto-approval is on, your voucher will be ready below. Otherwise, wait for manual approval.</div>
+                <div class="alert alert-success">Payment submitted! If auto-approval is on, your voucher will be ready shortly. Otherwise, wait for manual approval.</div>
                 <p><a href="/" class="btn">Back to Home</a></p>
             </div>
-        """).replace("{pending_count}", "0"))
+        """
+        return render_page("Verification Submitted", content, get_pending_count())
 
-    return render_template_string(base_template.replace("{title}", "Verify Payment").replace("{content}", f"""
+    content = f"""
         <div class="card">
             <div class="card-header">Pay for Internet</div>
-            <p><strong>Selected Plan:</strong> {plan[1]} – {plan[2]} min – UGX {plan[3]:,}</p>
+            <p><strong>Selected Plan:</strong> {plan[1]} - {plan[2]} min - UGX {plan[3]:,}</p>
             <p><strong>Pay to:</strong></p>
             <p>MTN: 0785686404 | Airtel: 0751318876</p>
             <p style="color:#666;">Name: Rocky Peter Abayo</p>
@@ -360,7 +472,8 @@ def sms_verify():
                 <button type="submit" class="btn" style="margin-top:20px; width:100%;">Verify Payment</button>
             </form>
         </div>
-    """).replace("{pending_count}", "0"))
+    """
+    return render_page("Verify Payment", content, get_pending_count())
 
 # ------------------------------------------------------------
 # ADMIN ROUTES
@@ -379,8 +492,10 @@ def login():
             session['provider_id'] = provider[0]
             session['provider_name'] = provider[1]
             return redirect('/dashboard')
-        return "Invalid credentials. <a href='/login'>Try again</a>"
-    return render_template_string(base_template.replace("{title}", "Admin Login").replace("{content}", """
+        content = '<div class="card"><div class="alert alert-error">Invalid credentials.</div><p><a href="/login">Try again</a></p></div>'
+        return render_page("Admin Login", content, get_pending_count())
+
+    content = """
         <div class="card">
             <div class="card-header">Provider Login</div>
             <form method="POST">
@@ -391,7 +506,8 @@ def login():
                 <button type="submit" class="btn" style="margin-top:20px; width:100%;">Login</button>
             </form>
         </div>
-    """).replace("{pending_count}", "0"))
+    """
+    return render_page("Admin Login", content, get_pending_count())
 
 @app.route('/logout')
 def logout():
@@ -410,15 +526,14 @@ def dashboard():
     sms_count, sms_rev = c.fetchone()
     c.execute("SELECT COUNT(*), COALESCE(SUM(plans.price_ugx),0) FROM vouchers v JOIN plans ON v.plan_id=plans.id WHERE v.provider_id=? AND v.payment_method='cash' AND date(v.created_at)=?", (provider_id, today))
     cash_count, cash_rev = c.fetchone()
-    c.execute("SELECT COUNT(*) FROM voucher_requests WHERE provider_id=? AND status='pending'", (provider_id,))
-    pending = c.fetchone()[0]
+    pending = get_pending_count()
     conn.close()
 
-    return render_template_string(base_template.replace("{title}", "Dashboard").replace("{content}", f"""
+    content = f"""
         <div class="card"><h2>Welcome, {session['provider_name']}</h2></div>
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:10px;">
-            <div class="card" style="text-align:center;"><h3>UGX {sms_rev:,}</h3><small>SMS Revenue Today</small></div>
-            <div class="card" style="text-align:center;"><h3>UGX {cash_rev:,}</h3><small>Cash Revenue Today</small></div>
+        <div class="stat-grid">
+            <div class="card" style="text-align:center;"><h3>UGX {sms_rev or 0:,}</h3><small>SMS Revenue Today</small></div>
+            <div class="card" style="text-align:center;"><h3>UGX {cash_rev or 0:,}</h3><small>Cash Revenue Today</small></div>
             <div class="card" style="text-align:center;"><h3>{pending}</h3><small>Pending Approvals</small></div>
         </div>
         <div class="card">
@@ -427,7 +542,8 @@ def dashboard():
             <a href="/generate-cash" class="btn" style="margin:5px;">Generate Cash Voucher</a>
             <a href="/stats" class="btn btn-outline" style="margin:5px;">Full Statistics</a>
         </div>
-    """).replace("{pending_count}", str(pending)))
+    """
+    return render_page("Dashboard", content, pending)
 
 @app.route('/pending')
 @login_required
@@ -435,7 +551,7 @@ def pending():
     provider_id = session['provider_id']
     conn = sqlite3.connect('rockabywifi.db')
     c = conn.cursor()
-    c.execute("""SELECT vr.id, vr.phone_number, pl.name, vr.amount, vr.transaction_id, vr.recipient, vr.created_at, vr.raw_sms
+    c.execute("""SELECT vr.id, vr.phone_number, pl.name, vr.amount, vr.transaction_id, vr.created_at
                  FROM voucher_requests vr JOIN plans pl ON vr.plan_id = pl.id
                  WHERE vr.provider_id=? AND vr.status='pending' ORDER BY vr.created_at DESC""", (provider_id,))
     pending_list = c.fetchall()
@@ -443,14 +559,14 @@ def pending():
 
     rows = ""
     for req in pending_list:
-        rid, phone, plan_name, amount, tid, recipient, created, raw_sms = req
+        rid, phone, plan_name, amount, tid, created = req
         rows += f"""
         <tr>
             <td>{phone}</td>
             <td>{plan_name}</td>
-            <td>UGX {amount:,}</td>
+            <td>UGX {amount or 0:,}</td>
             <td>{tid}</td>
-            <td>{created[:16] if created else ''}</td>
+            <td>{str(created)[:16] if created else ''}</td>
             <td>
                 <a href="/approve/{rid}" class="btn btn-small btn-success">Approve</a>
                 <a href="/reject/{rid}" class="btn btn-small btn-danger">Reject</a>
@@ -459,7 +575,7 @@ def pending():
     if not rows:
         rows = "<tr><td colspan='6'>No pending requests.</td></tr>"
 
-    return render_template_string(base_template.replace("{title}", "Pending Approvals").replace("{content}", f"""
+    content = f"""
         <div class="card">
             <div class="card-header">Pending Approvals</div>
             <table>
@@ -467,7 +583,8 @@ def pending():
                 {rows}
             </table>
         </div>
-    """).replace("{pending_count}", str(len(pending_list))))
+    """
+    return render_page("Pending Approvals", content, len(pending_list))
 
 @app.route('/approve/<int:req_id>')
 @login_required
@@ -501,6 +618,8 @@ def reject(req_id):
 @login_required
 def generate_cash():
     provider_id = session['provider_id']
+    pending_count = get_pending_count()
+
     if request.method == 'POST':
         plan_id = int(request.form['plan_id'])
         phone = request.form.get('phone', '').strip()
@@ -511,23 +630,19 @@ def generate_cash():
                   (provider_id, code, plan_id, phone))
         conn.commit()
         conn.close()
-        return render_template_string(base_template.replace("{title}", "Voucher Generated").replace("{content}", f"""
+        content = f"""
             <div class="card">
                 <div class="alert alert-success">Cash voucher generated successfully!</div>
-                <p><strong>Voucher Code:</strong> <span style="font-size:1.5rem; font-weight:700;">{code}</span></p>
+                <p><strong>Voucher Code:</strong></p>
+                <div class="voucher-code">{code}</div>
                 <p>Give this code to the customer.</p>
                 <a href="/generate-cash" class="btn">Generate Another</a>
                 <a href="/dashboard" class="btn btn-outline">Dashboard</a>
             </div>
-        """).replace("{pending_count}", "0"))
+        """
+        return render_page("Voucher Generated", content, pending_count)
 
-    conn = sqlite3.connect('rockabywifi.db')
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM voucher_requests WHERE provider_id=? AND status='pending'", (provider_id,))
-    pending_count = c.fetchone()[0]
-    conn.close()
-
-    return render_template_string(base_template.replace("{title}", "Generate Cash Voucher").replace("{content}", f"""
+    content = f"""
         <div class="card">
             <div class="card-header">Generate Cash Voucher</div>
             <form method="POST">
@@ -540,7 +655,8 @@ def generate_cash():
                 <button type="submit" class="btn" style="margin-top:20px; width:100%;">Generate Voucher</button>
             </form>
         </div>
-    """).replace("{pending_count}", str(pending_count)))
+    """
+    return render_page("Generate Cash Voucher", content, pending_count)
 
 @app.route('/stats')
 @login_required
@@ -563,8 +679,7 @@ def stats():
     c.execute("SELECT p.name, COUNT(*) FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? GROUP BY p.name ORDER BY COUNT(*) DESC", (provider_id,))
     plan_stats = c.fetchall()
 
-    c.execute("SELECT COUNT(*) FROM voucher_requests WHERE provider_id=? AND status='pending'", (provider_id,))
-    pending_count = c.fetchone()[0]
+    pending_count = get_pending_count()
 
     # Revenue last 7 days
     c.execute("""SELECT date(created_at) as day, COALESCE(SUM(amount),0) FROM voucher_requests
@@ -577,24 +692,26 @@ def stats():
     cash_daily = dict(c.fetchall())
 
     last_7 = [(date.today() - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    max_rev = max([sms_daily.get(d,0) + cash_daily.get(d,0) for d in last_7] + [1])
     bar_html = ""
     for d in last_7:
         sms = sms_daily.get(d, 0)
         cash = cash_daily.get(d, 0)
         total = sms + cash
+        pct = int((total / max_rev) * 100) if max_rev > 0 else 0
         bar_html += f"""
         <div style="display:flex; align-items:center; margin:4px 0; font-size:0.8rem;">
             <div style="width:60px;">{d[5:]}</div>
             <div style="flex:1; background:#eee; height:20px; border-radius:4px;">
-                <div style="width:{min(total/100, 100)}%; background:var(--primary); height:100%; border-radius:4px;"></div>
+                <div style="width:{pct}%; background:var(--primary); height:100%; border-radius:4px;"></div>
             </div>
-            <div style="width:70px; text-align:right;">UGX {total:,}</div>
+            <div style="width:80px; text-align:right;">UGX {total:,}</div>
         </div>"""
 
     conn.close()
 
-    return render_template_string(base_template.replace("{title}", "Statistics").replace("{content}", f"""
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:10px;">
+    content = f"""
+        <div class="stat-grid">
             <div class="card" style="text-align:center;"><h3>UGX {sms_rev or 0:,}</h3><small>SMS Revenue Today</small></div>
             <div class="card" style="text-align:center;"><h3>UGX {cash_rev or 0:,}</h3><small>Cash Revenue Today</small></div>
             <div class="card" style="text-align:center;"><h3>{used_count}</h3><small>Vouchers Used</small></div>
@@ -613,9 +730,10 @@ def stats():
             </table>
         </div>
         <a href="/dashboard" class="btn btn-outline">Back to Dashboard</a>
-    """).replace("{pending_count}", str(pending_count)))
+    """
+    return render_page("Statistics", content, pending_count)
 
-# Reset DB route (temporary - remove after use)
+# Reset DB route (temporary)
 @app.route('/reset-db')
 def reset_db():
     try:
