@@ -865,43 +865,36 @@ def delete_plan(plan_id):
     return redirect('/plans')
 
 # ---- PROVIDER SETTINGS (edit poster, support phone, etc.) ----
-@app.route('/provider/edit', methods=['GET', 'POST'])
-@login_required
-def edit_provider():
-    provider = get_provider(session['provider_id'])
-    if request.method == 'POST':
-        business_name = request.form['business_name']
-        support_phone = request.form['support_phone']
-        file = request.files.get('poster')
-        filename = provider[11]  # keep old poster
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-        conn = sqlite3.connect('rockabywifi.db')
-        c = conn.cursor()
-        c.execute("UPDATE providers SET business_name=?, support_phone=?, poster_image=? WHERE id=?",
-                  (business_name, support_phone, filename, session['provider_id']))
-        conn.commit()
-        conn.close()
-        session['provider_name'] = business_name
-        return redirect('/dashboard')
-
+@app.route('/')
+def home():
+    provider = get_provider(1)
+    business_name = provider[1] if provider else 'RockabyWiFi'
+    poster_html = ''
+    if provider and provider[11]:
+        poster_html = f'<img src="/static/uploads/{provider[11]}" style="width:100%; max-height:200px; object-fit:cover; border-radius:8px; margin-bottom:15px;">'
     content = f"""
+        {poster_html}
         <div class="card">
-            <div class="card-header">Provider Settings</div>
-            <form method="POST" enctype="multipart/form-data">
-                <label>Business Name</label>
-                <input type="text" name="business_name" value="{provider[1]}" required>
-                <label>Support WhatsApp (e.g., 256751318876)</label>
-                <input type="text" name="support_phone" value="{provider[12] or ''}">
-                <label>Portal Poster/Logo</label>
-                <input type="file" name="poster" accept="image/*">
-                {'<p>Current: <img src="/static/uploads/' + provider[11] + '" style="max-width:200px; border-radius:8px;"></p>' if provider[11] else ''}
-                <button type="submit" class="btn" style="margin-top:20px;">Save Settings</button>
+            <h2>{business_name}</h2>
+            <p style="color:#666;">Select a plan, pay via Mobile Money, paste your SMS, and get your voucher instantly.</p>
+        </div>
+        <div class="card">
+            <div class="card-header">Choose a Plan</div>
+            <form method="GET" action="/sms-verify">
+                <label>Your Phone Number *</label>
+                <input type="tel" name="phone" required>
+                <label>Select Plan</label>
+                <select name="plan_id" required>
+                    {get_plan_options(1)}
+                </select>
+                <button type="submit" class="btn" style="margin-top:20px; width:100%;">Continue to Payment</button>
             </form>
         </div>
+        <p style="text-align:center; margin-top:15px;">
+            <a href="/redeem" class="btn btn-outline">Already have a voucher? Enter it here</a>
+        </p>
     """
-    return render_page("Settings", content, get_pending_count())
+    return render_page("Get Internet Access", content, get_pending_count())
 
 # (The rest of the routes: pending, approve, reject, generate-cash, stats remain unchanged from the last working version)
 # They are included below for completeness.
