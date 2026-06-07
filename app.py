@@ -875,12 +875,14 @@ def edit_provider():
         support_phone = request.form['support_phone']
         file = request.files.get('poster')
         filename = provider[11]  # keep old poster
+
         if file and allowed_file(file.filename):
-            # Force-create the uploads folder with full path
+            # Recreate the uploads folder in case Render wiped it
             upload_path = os.path.join(os.getcwd(), 'static', 'uploads')
             os.makedirs(upload_path, exist_ok=True)
             filename = secure_filename(file.filename)
             file.save(os.path.join(upload_path, filename))
+
         conn = sqlite3.connect('rockabywifi.db')
         c = conn.cursor()
         c.execute("UPDATE providers SET business_name=?, support_phone=?, poster_image=? WHERE id=?",
