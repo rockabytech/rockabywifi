@@ -124,14 +124,13 @@ def login_required(f):
 def parse_mtn_sms(sms):
     tid = re.search(r'ID:\s*(\d+)', sms)
     amount = re.search(r'UGX\s*([\d,]+)', sms)
-    recipient = re.search(r'to\s+(.+?),', sms)
-    date_str = re.search(r'on\s+(\d{4}-\d{2}-\d{2})', sms)
-    # Try to extract number after "to ... ," – MTN often has the number after the name
+    recipient_name = re.search(r'to\s+(.+?),', sms)
     number_match = re.search(r'to\s+.+?[, ]+(\d{10,12})', sms)
+    date_str = re.search(r'on\s+(\d{4}-\d{2}-\d{2})', sms)
     return {
         'tid': tid.group(1) if tid else None,
         'amount': int(amount.group(1).replace(',','')) if amount else None,
-        'recipient_name': recipient.group(1).strip() if recipient else None,
+        'recipient_name': recipient_name.group(1).strip() if recipient_name else None,
         'recipient_number': number_match.group(1) if number_match else None,
         'date': date_str.group(1) if date_str else None
     }
@@ -139,7 +138,6 @@ def parse_mtn_sms(sms):
 def parse_airtel_sms(sms):
     tid = re.search(r'TID\s*(\d+)', sms)
     amount = re.search(r'UGX\s*([\d,]+)', sms)
-    # Airtel format: "to RECIPIENT on NUMBER"
     recipient_match = re.search(r'to\s+(.+?)\s+on\s+(\d+)', sms, re.IGNORECASE)
     if recipient_match:
         recipient_name = recipient_match.group(1).strip()
@@ -190,7 +188,6 @@ def get_auto_approve():
 
 def get_weekly_platform_revenue():
     today = date.today()
-    # Find the most recent Sunday
     if today.weekday() == 6:
         start_of_week = today
     else:
@@ -211,7 +208,6 @@ def get_weekly_platform_revenue():
     return int(total * 0.05), start_of_week, end_of_week
 
 def clean_number(num):
-    """Normalise a phone number to 256XXXXXXXX format."""
     digits = ''.join(filter(str.isdigit, num))
     if digits.startswith('0'):
         digits = '256' + digits[1:]
@@ -220,7 +216,7 @@ def clean_number(num):
     return digits
 
 # ------------------------------------------------------------
-# BASE TEMPLATE
+# BASE TEMPLATE (with WhatsApp support button)
 # ------------------------------------------------------------
 base_template = """
 <!DOCTYPE html>
@@ -347,6 +343,34 @@ base_template = """
             margin: 10px 0;
             border-radius: 6px;
         }
+        .copy-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        .copy-btn:hover { background: #218838; }
+        .whatsapp-float {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #25D366;
+            color: white;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            z-index: 999;
+            text-decoration: none;
+        }
         @media (max-width: 600px) {
             .navbar { flex-direction: column; gap: 10px; }
         }
@@ -366,6 +390,7 @@ base_template = """
     <footer>
         &copy; 2025 RockabyTech - WiFi Billing Made Simple
     </footer>
+    <a href="https://wa.me/256751318876?text=Hi%20RockabyWiFi%20Support" target="_blank" class="whatsapp-float">💬</a>
 </body>
 </html>
 """
@@ -402,8 +427,59 @@ def home():
                 <button type="submit" class="btn" style="margin-top:20px; width:100%;">Continue to Payment</button>
             </form>
         </div>
+        <p style="text-align:center; margin-top:15px;">
+            <a href="/redeem" class="btn btn-outline">Already have a voucher? Enter it here</a>
+        </p>
     """
     return render_page("Get Internet Access", content, get_pending_count())
+
+@app.route('/redeem', methods=['GET', 'POST'])
+def redeem():
+    if request.method == 'POST':
+        code = request.form['code'].strip().upper()
+        conn = sqlite3.connect('rockabywifi.db')
+        c = conn.cursor()
+        c.execute("SELECT id, used, plan_id FROM vouchers WHERE code=?", (code,))
+        voucher = c.fetchone()
+        if voucher and not voucher[1]:
+            # Mark as used (simulate activation)
+            c.execute("UPDATE vouchers SET used=1, used_at=CURRENT_TIMESTAMP WHERE id=?", (voucher[0],))
+            conn.commit()
+            conn.close()
+            content = f"""
+                <div class="card">
+                    <div class="alert alert-success">Connected! Enjoy your internet access.</div>
+                    <p>Your voucher <strong>{code}</strong> is now active.</p>
+                    <a href="/" class="btn">Back to Home</a>
+                </div>
+            """
+            return render_page("Voucher Redeemed", content, get_pending_count())
+        else:
+            conn.close()
+            error = "Invalid or already used voucher code."
+            content = f"""
+                <div class="card">
+                    <div class="alert alert-error">{error}</div>
+                    <form method="POST">
+                        <label>Enter Voucher Code</label>
+                        <input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required>
+                        <button type="submit" class="btn" style="margin-top:15px; width:100%;">Redeem</button>
+                    </form>
+                </div>
+            """
+            return render_page("Redeem Voucher", content, get_pending_count())
+
+    content = """
+        <div class="card">
+            <div class="card-header">Redeem Voucher</div>
+            <form method="POST">
+                <label>Enter Voucher Code</label>
+                <input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required>
+                <button type="submit" class="btn" style="margin-top:15px; width:100%;">Redeem</button>
+            </form>
+        </div>
+    """
+    return render_page("Redeem Voucher", content, get_pending_count())
 
 @app.route('/sms-verify', methods=['GET', 'POST'])
 def sms_verify():
@@ -451,7 +527,6 @@ def sms_verify():
                 if sms_num != mtn_num and sms_num != airtel_num:
                     error = "Payment not sent to the correct WiFi provider number."
             else:
-                # fallback: check if provider number appears inside the recipient name
                 recipient_lower = parsed['recipient_name'].lower()
                 if provider[1] and provider[1] not in recipient_lower and provider[2] and provider[2] not in recipient_lower:
                     error = "Payment not sent to the correct WiFi provider number."
@@ -507,10 +582,19 @@ def sms_verify():
                 <div class="card">
                     <div class="alert alert-success">Payment verified! Your internet access is ready.</div>
                     <p><strong>Your Voucher Code:</strong></p>
-                    <div class="voucher-code">{voucher_code}</div>
-                    <p>Use this code to connect to the WiFi network.</p>
+                    <div class="voucher-code" id="voucherCode">{voucher_code}</div>
+                    <button class="copy-btn" onclick="copyVoucher()">📋 Copy</button>
+                    <p style="margin-top:10px;">Use this code on the <a href="/redeem">Redeem page</a> to connect.</p>
                     <a href="/" class="btn">Back to Home</a>
                 </div>
+                <script>
+                    function copyVoucher() {{
+                        const code = document.getElementById('voucherCode').innerText;
+                        navigator.clipboard.writeText(code).then(() => {{
+                            alert('Voucher copied to clipboard!');
+                        }});
+                    }}
+                </script>
             """
         else:
             conn = sqlite3.connect('rockabywifi.db')
@@ -551,7 +635,7 @@ def sms_verify():
     return render_page("Verify Payment", content, pending_count)
 
 # ------------------------------------------------------------
-# ADMIN ROUTES
+# ADMIN ROUTES (unchanged except for pending count updates)
 # ------------------------------------------------------------
 @app.route('/login', methods=['GET', 'POST'])
 def login():
