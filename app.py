@@ -91,7 +91,6 @@ def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
 
-     # Settings table (MUST be created before inserting)
     c.execute('''CREATE TABLE IF NOT EXISTS settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider_id INTEGER NOT NULL,
@@ -100,17 +99,20 @@ def init_db():
         FOREIGN KEY(provider_id) REFERENCES providers(id)
     )''')
 
-    # Default super admin
+    # Create default admin if not exists
     c.execute("SELECT COUNT(*) FROM providers WHERE id=1")
     if c.fetchone()[0] == 0:
         hashed = generate_password_hash('admin123')
-        c.execute("INSERT INTO providers (business_name, contact, password_hash, subscription_expiry, is_active) VALUES (?,?,?,?,?)",
+        c.execute("INSERT INTO providers (id, business_name, contact, password_hash, subscription_expiry, is_active) VALUES (1, ?, ?, ?, ?, ?)",
                   ('RockabyWiFi Admin', '256787654321', hashed, date.today() + timedelta(days=3650), 1))
         # Default plans
         for name, mins, price in [('1 Hour', 60, 1000), ('3 Hours', 180, 2500), ('1 Day', 1440, 5000), ('1 Week', 10080, 20000)]:
             c.execute("INSERT INTO plans (provider_id, name, duration_minutes, price_ugx) VALUES (1, ?, ?, ?)", (name, mins, price))
         # Default settings
         c.execute("INSERT INTO settings (provider_id, key, value) VALUES (1, 'auto_approve', '1')")
+
+    conn.commit()
+    conn.close()
 
 # ------------------------------------------------------------
 # HELPERS
@@ -250,15 +252,6 @@ base_template = """
 # ------------------------------------------------------------
 # CUSTOMER ROUTES
 # ------------------------------------------------------------
-@app.route('/reset-db')
-def reset_db():
-    import os
-    try:
-        os.remove('rockabywifi.db')
-        return "Database deleted. <a href='/'>Go to Home</a> to recreate."
-    except:
-        return "Database not found or already deleted. <a href='/'>Go to Home</a>"
-
 @app.route('/')
 def home():
     return render_template_string(base_template.replace("{title}", "Get Internet Access").replace("{content}", f"""
