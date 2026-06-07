@@ -250,6 +250,15 @@ base_template = """
 # ------------------------------------------------------------
 # CUSTOMER ROUTES
 # ------------------------------------------------------------
+@app.route('/reset-db')
+def reset_db():
+    import os
+    try:
+        os.remove('rockabywifi.db')
+        return "Database deleted. <a href='/'>Go to Home</a> to recreate."
+    except:
+        return "Database not found or already deleted. <a href='/'>Go to Home</a>"
+
 @app.route('/')
 def home():
     return render_template_string(base_template.replace("{title}", "Get Internet Access").replace("{content}", f"""
