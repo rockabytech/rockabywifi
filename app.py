@@ -607,7 +607,7 @@ def login():
                 session.permanent = True
             return redirect('/dashboard')
         return render_page("Admin Login", '<div class="card"><div class="alert alert-error">Invalid credentials.</div><p><a href="/login">Try again</a></p></div>', 0, admin=False)
-    return render_page("Admin Login", '<div class="card"><div class="card-header">Provider Login</div><form method="POST"><label>Phone Number</label><input type="tel" name="contact" required><label>Password</label><input type="password" name="password" required><div class="remember-row"><input type="checkbox" name="remember"><label for="remember">Remember me</label></div><button type="submit" class="btn" style="margin-top:20px; width:100%;">Login</button></form></div>', 0, admin=False)
+    return render_page("Admin Login", '<div class="card"><div class="card-header">Provider Login</div><form method="POST"><label>Phone Number</label><input type="tel" name="contact" required><label>Password</label><input type="password" name="password" required><div class="remember-row"><input type="checkbox" name="remember"> Remember me</div><button type="submit" class="btn" style="margin-top:20px; width:100%;">Login</button></form></div>', 0, admin=False)
 
 @app.route('/logout')
 def logout():
@@ -621,7 +621,7 @@ def dashboard():
     db = get_db()
     today = date.today().isoformat()
     sms_row = db.execute("SELECT COUNT(*) as cnt, COALESCE(SUM(amount),0) as total FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at)=?", (provider_id, today)).fetchone()
-    cash_row = db.execute("SELECT COUNT(*) as cnt, COALESCE(SUM(pl.price_ugx),0) as total FROM vouchers v JOIN plans ON v.plan_id=plans.id WHERE v.provider_id=? AND v.payment_method='cash' AND date(v.created_at)=?", (provider_id, today)).fetchone()
+    cash_row = db.execute("SELECT COUNT(*) as cnt, COALESCE(SUM(pl.price_ugx),0) as total FROM vouchers v JOIN plans pl ON v.plan_id=pl.id WHERE v.provider_id=? AND v.payment_method='cash' AND date(v.created_at)=?", (provider_id, today)).fetchone()
     pending = get_pending_count()
     auto_approve = get_auto_approve()
     auto_status = "ON" if auto_approve else "OFF"
@@ -744,8 +744,6 @@ def delete_subscriber(sub_id):
     return redirect('/subscribers')
 
 # ---- PLANS, PENDING, APPROVE, REJECT, GENERATE CASH, STATS, PROVIDER EDIT ----
-# (These are unchanged except using get_db() and row_factory. I'll include compact versions.)
-
 @app.route('/plans')
 @login_required
 def list_plans():
@@ -842,13 +840,12 @@ def stats():
     db = get_db()
     today = date.today().isoformat()
     sms_row = db.execute("SELECT COUNT(*) as cnt, COALESCE(SUM(amount),0) as total FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at)=?", (provider_id, today)).fetchone()
-    cash_row = db.execute("SELECT COUNT(*) as cnt, COALESCE(SUM(pl.price_ugx),0) as total FROM vouchers v JOIN plans ON v.plan_id=plans.id WHERE v.provider_id=? AND v.payment_method='cash' AND date(v.created_at)=?", (provider_id, today)).fetchone()
+    cash_row = db.execute("SELECT COUNT(*) as cnt, COALESCE(SUM(pl.price_ugx),0) as total FROM vouchers v JOIN plans pl ON v.plan_id=pl.id WHERE v.provider_id=? AND v.payment_method='cash' AND date(v.created_at)=?", (provider_id, today)).fetchone()
     used_row = db.execute("SELECT COUNT(*) as cnt FROM vouchers WHERE provider_id=? AND used=1", (provider_id,)).fetchone()
     unused_row = db.execute("SELECT COUNT(*) as cnt FROM vouchers WHERE provider_id=? AND used=0", (provider_id,)).fetchone()
     plan_stats = db.execute("SELECT p.name, COUNT(*) as cnt FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? GROUP BY p.name ORDER BY cnt DESC", (provider_id,)).fetchall()
     pending_count = get_pending_count()
     weekly_fee, week_start, week_end = get_weekly_platform_revenue()
-    # 7-day revenue bars (simplified)
     content = f"""
         <div class="stat-grid">
         <div class="card" style="text-align:center;"><h3>UGX {sms_row['total'] or 0:,}</h3><small>SMS Revenue Today</small></div>
@@ -891,9 +888,283 @@ def edit_provider():
     content = f'<div class="card"><div class="card-header">Provider Settings</div><form method="POST" enctype="multipart/form-data"><label>Business Name</label><input type="text" name="business_name" value="{provider["business_name"] if provider else ""}" required><label>Support WhatsApp</label><input type="text" name="support_phone" value="{provider["support_phone"] if provider else ""}"><label>Portal Poster/Banner</label><input type="file" name="poster" accept="image/*">{poster_display}<label>Business Logo</label><input type="file" name="logo" accept="image/*">{logo_display}<button type="submit" class="btn" style="margin-top:20px;">Save Settings</button></form></div>'
     return render_page("Settings", content, get_pending_count(), admin=True)
 
-# ---- NEW MODULE ROUTES (Tickets, Leads, Expenses, Messages, Email, Campaign, Equipment, MikroTik) ----
-# (Include all the routes from the previous "new modules" section. They are already defined above. I'll repeat them for completeness.)
-# ... (Tickets, Leads, Expenses, Messages, Email, Campaign, Equipment, MikroTik routes identical to previous version) ...
+# ---- NEW MODULE ROUTES (fully functional) ----
+# Tickets
+@app.route('/tickets')
+@login_required
+def tickets():
+    db = get_db()
+    items = db.execute("SELECT id, subject, status, created_at FROM tickets WHERE provider_id=? ORDER BY id DESC", (session['provider_id'],)).fetchall()
+    rows = ''.join(f'<tr><td>{t["subject"]}</td><td>{t["status"]}</td><td>{t["created_at"][:16] if t["created_at"] else ""}</td><td><a href="/tickets/edit/{t["id"]}" class="btn btn-small">Edit</a> <a href="/tickets/delete/{t["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for t in items) or '<tr><td colspan="4">No tickets.</td></tr>'
+    content = f'<div class="card"><div class="card-header"><i class="fas fa-ticket-alt"></i> Tickets</div><a href="/tickets/add" class="btn btn-success" style="margin-bottom:15px;">+ Add Ticket</a><table><tr><th>Subject</th><th>Status</th><th>Created</th><th>Action</th></tr>{rows}</table></div>'
+    return render_page("Tickets", content, get_pending_count(), admin=True)
+
+@app.route('/tickets/add', methods=['GET', 'POST'])
+@login_required
+def add_ticket():
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO tickets (provider_id, subject, description) VALUES (?, ?, ?)", (session['provider_id'], request.form['subject'], request.form['description']))
+        db.commit()
+        return redirect('/tickets')
+    content = '<div class="card"><div class="card-header"><i class="fas fa-ticket-alt"></i> Add Ticket</div><form method="POST"><label>Subject</label><input type="text" name="subject" required><label>Description</label><textarea name="description"></textarea><button type="submit" class="btn" style="margin-top:20px;">Save</button></form></div>'
+    return render_page("Add Ticket", content, get_pending_count(), admin=True)
+
+@app.route('/tickets/edit/<int:tid>', methods=['GET', 'POST'])
+@login_required
+def edit_ticket(tid):
+    db = get_db()
+    if request.method == 'POST':
+        db.execute("UPDATE tickets SET subject=?, description=?, status=? WHERE id=? AND provider_id=?", (request.form['subject'], request.form['description'], request.form['status'], tid, session['provider_id']))
+        db.commit()
+        return redirect('/tickets')
+    t = db.execute("SELECT * FROM tickets WHERE id=? AND provider_id=?", (tid, session['provider_id'])).fetchone()
+    if not t: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit Ticket</div><form method="POST"><label>Subject</label><input type="text" name="subject" value="{t["subject"]}" required><label>Description</label><textarea name="description">{t["description"] or ""}</textarea><label>Status</label><select name="status"><option value="open" {"selected" if t["status"]=="open" else ""}>Open</option><option value="closed" {"selected" if t["status"]=="closed" else ""}>Closed</option></select><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Ticket", content, get_pending_count(), admin=True)
+
+@app.route('/tickets/delete/<int:tid>')
+@login_required
+def delete_ticket(tid):
+    db = get_db()
+    db.execute("DELETE FROM tickets WHERE id=? AND provider_id=?", (tid, session['provider_id']))
+    db.commit()
+    return redirect('/tickets')
+
+# Leads
+@app.route('/leads')
+@login_required
+def leads():
+    db = get_db()
+    items = db.execute("SELECT id, name, phone, email, source, created_at FROM leads WHERE provider_id=? ORDER BY id DESC", (session['provider_id'],)).fetchall()
+    rows = ''.join(f'<tr><td>{l["name"]}</td><td>{l["phone"] or ""}</td><td>{l["email"] or ""}</td><td>{l["source"] or ""}</td><td>{l["created_at"][:16] if l["created_at"] else ""}</td><td><a href="/leads/edit/{l["id"]}" class="btn btn-small">Edit</a> <a href="/leads/delete/{l["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for l in items) or '<tr><td colspan="6">No leads.</td></tr>'
+    content = f'<div class="card"><div class="card-header"><i class="fas fa-chart-line"></i> Leads</div><a href="/leads/add" class="btn btn-success" style="margin-bottom:15px;">+ Add Lead</a><table><tr><th>Name</th><th>Phone</th><th>Email</th><th>Source</th><th>Created</th><th>Action</th></tr>{rows}</table></div>'
+    return render_page("Leads", content, get_pending_count(), admin=True)
+
+@app.route('/leads/add', methods=['GET', 'POST'])
+@login_required
+def add_lead():
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO leads (provider_id, name, phone, email, source, notes) VALUES (?,?,?,?,?,?)", (session['provider_id'], request.form['name'], request.form['phone'], request.form['email'], request.form['source'], request.form['notes']))
+        db.commit()
+        return redirect('/leads')
+    content = '<div class="card"><div class="card-header"><i class="fas fa-chart-line"></i> Add Lead</div><form method="POST"><label>Name *</label><input type="text" name="name" required><label>Phone</label><input type="tel" name="phone"><label>Email</label><input type="email" name="email"><label>Source</label><input type="text" name="source"><label>Notes</label><textarea name="notes"></textarea><button type="submit" class="btn" style="margin-top:20px;">Save</button></form></div>'
+    return render_page("Add Lead", content, get_pending_count(), admin=True)
+
+@app.route('/leads/edit/<int:lid>', methods=['GET', 'POST'])
+@login_required
+def edit_lead(lid):
+    db = get_db()
+    if request.method == 'POST':
+        db.execute("UPDATE leads SET name=?, phone=?, email=?, source=?, notes=? WHERE id=? AND provider_id=?", (request.form['name'], request.form['phone'], request.form['email'], request.form['source'], request.form['notes'], lid, session['provider_id']))
+        db.commit()
+        return redirect('/leads')
+    l = db.execute("SELECT * FROM leads WHERE id=? AND provider_id=?", (lid, session['provider_id'])).fetchone()
+    if not l: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit Lead</div><form method="POST"><label>Name *</label><input type="text" name="name" value="{l["name"]}" required><label>Phone</label><input type="tel" name="phone" value="{l["phone"] or ""}"><label>Email</label><input type="email" name="email" value="{l["email"] or ""}"><label>Source</label><input type="text" name="source" value="{l["source"] or ""}"><label>Notes</label><textarea name="notes">{l["notes"] or ""}</textarea><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Lead", content, get_pending_count(), admin=True)
+
+@app.route('/leads/delete/<int:lid>')
+@login_required
+def delete_lead(lid):
+    db = get_db()
+    db.execute("DELETE FROM leads WHERE id=? AND provider_id=?", (lid, session['provider_id']))
+    db.commit()
+    return redirect('/leads')
+
+# Expenses
+@app.route('/expenses')
+@login_required
+def expenses():
+    db = get_db()
+    items = db.execute("SELECT id, description, amount, category, expense_date FROM expenses WHERE provider_id=? ORDER BY id DESC", (session['provider_id'],)).fetchall()
+    rows = ''.join(f'<tr><td>{e["description"]}</td><td>UGX {e["amount"]:,.0f}</td><td>{e["category"] or ""}</td><td>{e["expense_date"] if e["expense_date"] else ""}</td><td><a href="/expenses/edit/{e["id"]}" class="btn btn-small">Edit</a> <a href="/expenses/delete/{e["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for e in items) or '<tr><td colspan="5">No expenses.</td></tr>'
+    content = f'<div class="card"><div class="card-header"><i class="fas fa-receipt"></i> Expenses</div><a href="/expenses/add" class="btn btn-success" style="margin-bottom:15px;">+ Add Expense</a><table><tr><th>Description</th><th>Amount</th><th>Category</th><th>Date</th><th>Action</th></tr>{rows}</table></div>'
+    return render_page("Expenses", content, get_pending_count(), admin=True)
+
+@app.route('/expenses/add', methods=['GET', 'POST'])
+@login_required
+def add_expense():
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO expenses (provider_id, description, amount, category, expense_date) VALUES (?,?,?,?,?)", (session['provider_id'], request.form['description'], float(request.form['amount']), request.form['category'], request.form['expense_date']))
+        db.commit()
+        return redirect('/expenses')
+    content = '<div class="card"><div class="card-header"><i class="fas fa-receipt"></i> Add Expense</div><form method="POST"><label>Description *</label><input type="text" name="description" required><label>Amount (UGX) *</label><input type="number" name="amount" step="0.01" required><label>Category</label><input type="text" name="category"><label>Date</label><input type="date" name="expense_date"><button type="submit" class="btn" style="margin-top:20px;">Save</button></form></div>'
+    return render_page("Add Expense", content, get_pending_count(), admin=True)
+
+@app.route('/expenses/edit/<int:eid>', methods=['GET', 'POST'])
+@login_required
+def edit_expense(eid):
+    db = get_db()
+    if request.method == 'POST':
+        db.execute("UPDATE expenses SET description=?, amount=?, category=?, expense_date=? WHERE id=? AND provider_id=?", (request.form['description'], float(request.form['amount']), request.form['category'], request.form['expense_date'], eid, session['provider_id']))
+        db.commit()
+        return redirect('/expenses')
+    e = db.execute("SELECT * FROM expenses WHERE id=? AND provider_id=?", (eid, session['provider_id'])).fetchone()
+    if not e: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit Expense</div><form method="POST"><label>Description *</label><input type="text" name="description" value="{e["description"]}" required><label>Amount (UGX) *</label><input type="number" name="amount" step="0.01" value="{e["amount"]}" required><label>Category</label><input type="text" name="category" value="{e["category"] or ""}"><label>Date</label><input type="date" name="expense_date" value="{e["expense_date"] if e["expense_date"] else ""}"><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Expense", content, get_pending_count(), admin=True)
+
+@app.route('/expenses/delete/<int:eid>')
+@login_required
+def delete_expense(eid):
+    db = get_db()
+    db.execute("DELETE FROM expenses WHERE id=? AND provider_id=?", (eid, session['provider_id']))
+    db.commit()
+    return redirect('/expenses')
+
+# Messages
+@app.route('/messages', methods=['GET', 'POST'])
+@login_required
+def messages():
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO notifications (user_id, type, message) VALUES (?, 'admin_message', ?)", (session['provider_id'], request.form['message']))
+        db.commit()
+        return redirect('/messages')
+    db = get_db()
+    msgs = db.execute("SELECT message, created_at FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 20", (session['provider_id'],)).fetchall()
+    rows = "".join(f'<tr><td>{m["message"]}</td><td>{m["created_at"][:16] if m["created_at"] else ""}</td></tr>' for m in msgs) or '<tr><td colspan="2">No messages sent.</td></tr>'
+    content = f'<div class="card"><div class="card-header"><i class="fas fa-envelope"></i> Send Message</div><form method="POST"><label>Message</label><textarea name="message" required></textarea><button type="submit" class="btn" style="margin-top:15px;">Send</button></form></div><div class="card"><div class="card-header">Sent Messages</div><table><tr><th>Message</th><th>Time</th></tr>{rows}</table></div>'
+    return render_page("Messages", content, get_pending_count(), admin=True)
+
+# Email
+@app.route('/email', methods=['GET', 'POST'])
+@login_required
+def email():
+    if request.method == 'POST':
+        content = '<div class="card"><div class="alert alert-success">Email sending feature coming soon. (SMTP configuration required)</div><a href="/email" class="btn">Back</a></div>'
+        return render_page("Email", content, get_pending_count(), admin=True)
+    content = '<div class="card"><div class="card-header"><i class="fas fa-at"></i> Send Email</div><form method="POST"><label>To (email)</label><input type="email" name="to" required><label>Subject</label><input type="text" name="subject" required><label>Body</label><textarea name="body" rows="4"></textarea><button type="submit" class="btn" style="margin-top:15px;">Send</button></form><p style="color:var(--text-secondary);">SMTP not configured. This is a placeholder.</p></div>'
+    return render_page("Email", content, get_pending_count(), admin=True)
+
+# Campaigns
+@app.route('/campaign')
+@login_required
+def campaign():
+    db = get_db()
+    items = db.execute("SELECT id, name, description, start_date, end_date FROM campaigns WHERE provider_id=? ORDER BY id DESC", (session['provider_id'],)).fetchall()
+    rows = ''.join(f'<tr><td>{c["name"]}</td><td>{c["description"] or ""}</td><td>{c["start_date"] if c["start_date"] else ""}</td><td>{c["end_date"] if c["end_date"] else ""}</td><td><a href="/campaign/edit/{c["id"]}" class="btn btn-small">Edit</a> <a href="/campaign/delete/{c["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for c in items) or '<tr><td colspan="5">No campaigns.</td></tr>'
+    content = f'<div class="card"><div class="card-header"><i class="fas fa-bullhorn"></i> Campaigns</div><a href="/campaign/add" class="btn btn-success" style="margin-bottom:15px;">+ Add Campaign</a><table><tr><th>Name</th><th>Description</th><th>Start</th><th>End</th><th>Action</th></tr>{rows}</table></div>'
+    return render_page("Campaigns", content, get_pending_count(), admin=True)
+
+@app.route('/campaign/add', methods=['GET', 'POST'])
+@login_required
+def add_campaign():
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO campaigns (provider_id, name, description, start_date, end_date) VALUES (?,?,?,?,?)", (session['provider_id'], request.form['name'], request.form['description'], request.form['start_date'], request.form['end_date']))
+        db.commit()
+        return redirect('/campaign')
+    content = '<div class="card"><div class="card-header"><i class="fas fa-bullhorn"></i> Add Campaign</div><form method="POST"><label>Name *</label><input type="text" name="name" required><label>Description</label><textarea name="description"></textarea><label>Start Date</label><input type="date" name="start_date"><label>End Date</label><input type="date" name="end_date"><button type="submit" class="btn" style="margin-top:20px;">Save</button></form></div>'
+    return render_page("Add Campaign", content, get_pending_count(), admin=True)
+
+@app.route('/campaign/edit/<int:cid>', methods=['GET', 'POST'])
+@login_required
+def edit_campaign(cid):
+    db = get_db()
+    if request.method == 'POST':
+        db.execute("UPDATE campaigns SET name=?, description=?, start_date=?, end_date=? WHERE id=? AND provider_id=?", (request.form['name'], request.form['description'], request.form['start_date'], request.form['end_date'], cid, session['provider_id']))
+        db.commit()
+        return redirect('/campaign')
+    c = db.execute("SELECT * FROM campaigns WHERE id=? AND provider_id=?", (cid, session['provider_id'])).fetchone()
+    if not c: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit Campaign</div><form method="POST"><label>Name *</label><input type="text" name="name" value="{c["name"]}" required><label>Description</label><textarea name="description">{c["description"] or ""}</textarea><label>Start Date</label><input type="date" name="start_date" value="{c["start_date"] if c["start_date"] else ""}"><label>End Date</label><input type="date" name="end_date" value="{c["end_date"] if c["end_date"] else ""}"><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Campaign", content, get_pending_count(), admin=True)
+
+@app.route('/campaign/delete/<int:cid>')
+@login_required
+def delete_campaign(cid):
+    db = get_db()
+    db.execute("DELETE FROM campaigns WHERE id=? AND provider_id=?", (cid, session['provider_id']))
+    db.commit()
+    return redirect('/campaign')
+
+# Equipment
+@app.route('/equipment')
+@login_required
+def equipment():
+    db = get_db()
+    items = db.execute("SELECT id, name, model, serial_number, status FROM equipment WHERE provider_id=? ORDER BY id DESC", (session['provider_id'],)).fetchall()
+    rows = ''.join(f'<tr><td>{e["name"]}</td><td>{e["model"] or ""}</td><td>{e["serial_number"] or ""}</td><td>{e["status"]}</td><td><a href="/equipment/edit/{e["id"]}" class="btn btn-small">Edit</a> <a href="/equipment/delete/{e["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for e in items) or '<tr><td colspan="5">No equipment.</td></tr>'
+    content = f'<div class="card"><div class="card-header"><i class="fas fa-tools"></i> Equipment</div><a href="/equipment/add" class="btn btn-success" style="margin-bottom:15px;">+ Add Equipment</a><table><tr><th>Name</th><th>Model</th><th>Serial</th><th>Status</th><th>Action</th></tr>{rows}</table></div>'
+    return render_page("Equipment", content, get_pending_count(), admin=True)
+
+@app.route('/equipment/add', methods=['GET', 'POST'])
+@login_required
+def add_equipment():
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO equipment (provider_id, name, model, serial_number, status) VALUES (?,?,?,?,?)", (session['provider_id'], request.form['name'], request.form['model'], request.form['serial'], request.form['status']))
+        db.commit()
+        return redirect('/equipment')
+    content = '<div class="card"><div class="card-header"><i class="fas fa-tools"></i> Add Equipment</div><form method="POST"><label>Name *</label><input type="text" name="name" required><label>Model</label><input type="text" name="model"><label>Serial Number</label><input type="text" name="serial"><label>Status</label><select name="status"><option value="active">Active</option><option value="inactive">Inactive</option></select><button type="submit" class="btn" style="margin-top:20px;">Save</button></form></div>'
+    return render_page("Add Equipment", content, get_pending_count(), admin=True)
+
+@app.route('/equipment/edit/<int:eid>', methods=['GET', 'POST'])
+@login_required
+def edit_equipment(eid):
+    db = get_db()
+    if request.method == 'POST':
+        db.execute("UPDATE equipment SET name=?, model=?, serial_number=?, status=? WHERE id=? AND provider_id=?", (request.form['name'], request.form['model'], request.form['serial'], request.form['status'], eid, session['provider_id']))
+        db.commit()
+        return redirect('/equipment')
+    eq = db.execute("SELECT * FROM equipment WHERE id=? AND provider_id=?", (eid, session['provider_id'])).fetchone()
+    if not eq: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit Equipment</div><form method="POST"><label>Name *</label><input type="text" name="name" value="{eq["name"]}" required><label>Model</label><input type="text" name="model" value="{eq["model"] or ""}"><label>Serial Number</label><input type="text" name="serial" value="{eq["serial_number"] or ""}"><label>Status</label><select name="status"><option value="active" {"selected" if eq["status"]=="active" else ""}>Active</option><option value="inactive" {"selected" if eq["status"]=="inactive" else ""}>Inactive</option></select><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Equipment", content, get_pending_count(), admin=True)
+
+@app.route('/equipment/delete/<int:eid>')
+@login_required
+def delete_equipment(eid):
+    db = get_db()
+    db.execute("DELETE FROM equipment WHERE id=? AND provider_id=?", (eid, session['provider_id']))
+    db.commit()
+    return redirect('/equipment')
+
+# MikroTik
+@app.route('/mikrotik')
+@login_required
+def mikrotik():
+    db = get_db()
+    routers = db.execute("SELECT id, name, ip_address, username, is_active FROM mikrotik_routers WHERE provider_id=? ORDER BY id DESC", (session['provider_id'],)).fetchall()
+    rows = ''.join(f'<tr><td>{r["name"]}</td><td>{r["ip_address"] or ""}</td><td>{r["username"] or ""}</td><td>{"Yes" if r["is_active"] else "No"}</td><td><a href="/mikrotik/edit/{r["id"]}" class="btn btn-small">Edit</a> <a href="/mikrotik/delete/{r["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for r in routers) or '<tr><td colspan="5">No routers.</td></tr>'
+    content = f'<div class="card"><div class="card-header"><i class="fas fa-server"></i> MikroTik Routers</div><a href="/mikrotik/add" class="btn btn-success" style="margin-bottom:15px;">+ Add Router</a><table><tr><th>Name</th><th>IP</th><th>Username</th><th>Active</th><th>Action</th></tr>{rows}</table></div>'
+    return render_page("MikroTik", content, get_pending_count(), admin=True)
+
+@app.route('/mikrotik/add', methods=['GET', 'POST'])
+@login_required
+def add_mikrotik():
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO mikrotik_routers (provider_id, name, ip_address, username, password, api_port, is_active) VALUES (?,?,?,?,?,?,?)", (session['provider_id'], request.form['name'], request.form['ip'], request.form['username'], request.form['password'], int(request.form['port'] or 8728), 1 if request.form.get('is_active') else 0))
+        db.commit()
+        return redirect('/mikrotik')
+    content = '<div class="card"><div class="card-header"><i class="fas fa-server"></i> Add MikroTik Router</div><form method="POST"><label>Name *</label><input type="text" name="name" required><label>IP Address</label><input type="text" name="ip"><label>Username</label><input type="text" name="username"><label>Password</label><input type="password" name="password"><label>API Port</label><input type="number" name="port" value="8728"><label><input type="checkbox" name="is_active" checked> Active</label><button type="submit" class="btn" style="margin-top:20px;">Save</button></form></div>'
+    return render_page("Add MikroTik", content, get_pending_count(), admin=True)
+
+@app.route('/mikrotik/edit/<int:rid>', methods=['GET', 'POST'])
+@login_required
+def edit_mikrotik(rid):
+    db = get_db()
+    if request.method == 'POST':
+        db.execute("UPDATE mikrotik_routers SET name=?, ip_address=?, username=?, password=?, api_port=?, is_active=? WHERE id=? AND provider_id=?", (request.form['name'], request.form['ip'], request.form['username'], request.form['password'], int(request.form['port'] or 8728), 1 if request.form.get('is_active') else 0, rid, session['provider_id']))
+        db.commit()
+        return redirect('/mikrotik')
+    r = db.execute("SELECT * FROM mikrotik_routers WHERE id=? AND provider_id=?", (rid, session['provider_id'])).fetchone()
+    if not r: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit MikroTik Router</div><form method="POST"><label>Name *</label><input type="text" name="name" value="{r["name"]}" required><label>IP Address</label><input type="text" name="ip" value="{r["ip_address"] or ""}"><label>Username</label><input type="text" name="username" value="{r["username"] or ""}"><label>Password</label><input type="password" name="password" value="{r["password"] or ""}"><label>API Port</label><input type="number" name="port" value="{r["api_port"] or 8728}"><label><input type="checkbox" name="is_active" {"checked" if r["is_active"] else ""}> Active</label><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit MikroTik", content, get_pending_count(), admin=True)
+
+@app.route('/mikrotik/delete/<int:rid>')
+@login_required
+def delete_mikrotik(rid):
+    db = get_db()
+    db.execute("DELETE FROM mikrotik_routers WHERE id=? AND provider_id=?", (rid, session['provider_id']))
+    db.commit()
+    return redirect('/mikrotik')
 
 # ------------------------------------------------------------
 init_db()
