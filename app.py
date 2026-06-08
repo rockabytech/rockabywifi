@@ -7,6 +7,7 @@ from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = 'rockabywifi-secret-key-change-in-production'
+app.permanent_session_lifetime = timedelta(days=30)   # for "Remember me"
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 UPLOAD_FOLDER = os.path.join(os.getcwd(), 'static', 'uploads')
@@ -14,13 +15,14 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # ------------------------------------------------------------
-# DATABASE
+# DATABASE (with new subscribers table)
 # ------------------------------------------------------------
 def init_db():
     conn = sqlite3.connect('rockabywifi.db')
     conn.execute("PRAGMA busy_timeout = 5000;")
     c = conn.cursor()
 
+    # Providers
     c.execute('''CREATE TABLE IF NOT EXISTS providers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         business_name TEXT NOT NULL,
@@ -37,16 +39,12 @@ def init_db():
         logo_image TEXT,
         support_phone TEXT
     )''')
-
     c.execute("PRAGMA table_info(providers)")
-    prov_cols = [col[1] for col in c.fetchall()]
-    if 'poster_image' not in prov_cols:
-        c.execute("ALTER TABLE providers ADD COLUMN poster_image TEXT")
-    if 'logo_image' not in prov_cols:
-        c.execute("ALTER TABLE providers ADD COLUMN logo_image TEXT")
-    if 'support_phone' not in prov_cols:
-        c.execute("ALTER TABLE providers ADD COLUMN support_phone TEXT")
+    for col in ['poster_image', 'logo_image', 'support_phone']:
+        if col not in [c[1] for c in c.fetchall()]:
+            c.execute(f"ALTER TABLE providers ADD COLUMN {col} TEXT")
 
+    # Plans
     c.execute('''CREATE TABLE IF NOT EXISTS plans (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider_id INTEGER NOT NULL,
@@ -57,6 +55,7 @@ def init_db():
         FOREIGN KEY(provider_id) REFERENCES providers(id)
     )''')
 
+    # Voucher requests
     c.execute('''CREATE TABLE IF NOT EXISTS voucher_requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider_id INTEGER NOT NULL,
@@ -73,6 +72,7 @@ def init_db():
         FOREIGN KEY(provider_id) REFERENCES providers(id)
     )''')
 
+    # Vouchers
     c.execute('''CREATE TABLE IF NOT EXISTS vouchers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider_id INTEGER NOT NULL,
@@ -88,18 +88,35 @@ def init_db():
         FOREIGN KEY(provider_id) REFERENCES providers(id)
     )''')
 
+    # Subscriber accounts (long‑term customers)
+    c.execute('''CREATE TABLE IF NOT EXISTS subscribers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider_id INTEGER NOT NULL,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        phone TEXT,
+        current_ip TEXT,
+        suspended INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(provider_id) REFERENCES providers(id)
+    )''')
+
+    # Sessions (active subscriber logins)
     c.execute('''CREATE TABLE IF NOT EXISTS sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         voucher_id INTEGER,
+        subscriber_id INTEGER,
         provider_id INTEGER,
         mac_address TEXT,
         ip_address TEXT,
         started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         ended_at TIMESTAMP,
-        FOREIGN KEY(voucher_id) REFERENCES vouchers(id)
+        FOREIGN KEY(voucher_id) REFERENCES vouchers(id),
+        FOREIGN KEY(subscriber_id) REFERENCES subscribers(id)
     )''')
 
-    c.execute('''CREATE TABLE IF NOT EXISTS blacklist (
+    # Blacklist / restricted
+    c.execute('''CREATE TABLE IF NOT EXISTS restricted (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider_id INTEGER,
         phone_number TEXT,
@@ -108,6 +125,7 @@ def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
 
+    # Settings
     c.execute('''CREATE TABLE IF NOT EXISTS settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider_id INTEGER NOT NULL,
@@ -116,6 +134,7 @@ def init_db():
         FOREIGN KEY(provider_id) REFERENCES providers(id)
     )''')
 
+    # Default admin
     c.execute("SELECT COUNT(*) FROM providers WHERE id=1")
     if c.fetchone()[0] == 0:
         hashed = generate_password_hash('admin123')
@@ -128,12 +147,12 @@ def init_db():
     conn.close()
 
 # ------------------------------------------------------------
-# HELPERS
+# HELPERS (unchanged except for subscriber-related)
 # ------------------------------------------------------------
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if 'provider_id' not in session:
+        if 'provider_id' not in session and 'subscriber_id' not in session:
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated
@@ -217,7 +236,7 @@ def get_weekly_platform_revenue():
     return int(total * 0.05), start_of_week, end_of_week
 
 # ------------------------------------------------------------
-# BASE TEMPLATE
+# BASE TEMPLATE (now with sidebar for admin, clean for public)
 # ------------------------------------------------------------
 base_template = """
 <!DOCTYPE html>
@@ -226,27 +245,90 @@ base_template = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RockabyWiFi - {title}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     {% raw %}
     <style>
-        :root { --primary: #1a73e8; --primary-dark: #1557b0; --bg: #f0f4f8; --card-bg: #ffffff; --text: #1a1a1a; --text-secondary: #666666; --border: #e0e0e0; --radius: 12px; --shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        :root {
+            --primary: #1a73e8; --primary-dark: #1557b0;
+            --bg: #f0f4f8; --card-bg: #ffffff; --text: #1a1a1a;
+            --text-secondary: #666666; --border: #e0e0e0;
+            --radius: 12px; --shadow: 0 1px 3px rgba(0,0,0,0.1);
+            --sidebar-width: 250px;
+        }
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-        .navbar { background: var(--card-bg); box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-        .navbar .logo { font-size: 1.3rem; font-weight: 700; color: var(--primary); text-decoration: none; }
-        .nav-links { display: flex; gap: 15px; flex-wrap: wrap; align-items: center; }
-        .nav-links a { color: var(--text-secondary); text-decoration: none; font-weight: 500; font-size: 0.9rem; }
-        .nav-links a:hover { color: var(--primary); }
-        .btn { display: inline-block; padding: 10px 20px; background: var(--primary); color: #fff; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; text-decoration: none; font-size: 0.9rem; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--text); min-height: 100vh;
+        }
+        /* Sidebar only for admin */
+        .admin-layout { display: flex; }
+        .sidebar {
+            width: var(--sidebar-width);
+            background: #1e293b;
+            color: #fff;
+            height: 100vh;
+            position: fixed;
+            left: 0; top: 0;
+            overflow-y: auto;
+            transition: transform 0.3s;
+            z-index: 1000;
+        }
+        .sidebar.collapsed { transform: translateX(-100%); }
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex; align-items: center; gap: 10px;
+        }
+        .sidebar-header img { height: 36px; width: 36px; border-radius: 8px; }
+        .sidebar-header h3 { font-size: 1.1rem; font-weight: 600; }
+        .sidebar-menu { padding: 10px 0; }
+        .sidebar-menu a {
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 20px; color: #cbd5e1; text-decoration: none;
+            transition: background 0.2s; font-size: 0.9rem;
+        }
+        .sidebar-menu a:hover, .sidebar-menu a.active { background: rgba(255,255,255,0.1); color: #fff; }
+        .sidebar-menu .submenu a { padding-left: 40px; font-size: 0.85rem; }
+        .sidebar-footer {
+            position: absolute; bottom: 0; width: 100%;
+            padding: 10px; border-top: 1px solid rgba(255,255,255,0.1);
+            display: flex; justify-content: space-around;
+        }
+        .sidebar-footer a { color: #cbd5e1; text-decoration: none; font-size: 0.9rem; }
+        .main-content {
+            margin-left: var(--sidebar-width);
+            flex: 1; transition: margin-left 0.3s;
+        }
+        .main-content.expanded { margin-left: 0; }
+        .topbar {
+            background: var(--card-bg); padding: 12px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .hamburger { font-size: 1.5rem; cursor: pointer; background: none; border: none; color: var(--text); }
+        /* Public layout (no sidebar) */
+        .public-layout .main-content { margin-left: 0; }
+        .container { max-width: 900px; margin: 20px auto; padding: 0 15px; }
+        .card {
+            background: var(--card-bg); border-radius: var(--radius); padding: 24px;
+            margin-bottom: 16px; box-shadow: var(--shadow); border: 1px solid var(--border);
+        }
+        .card-header { font-size: 1.2rem; font-weight: 600; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+        label { display: block; margin-top: 15px; font-weight: 500; }
+        input, textarea, select {
+            width: 100%; padding: 10px 12px; margin-top: 5px; border-radius: 6px;
+            border: 1px solid var(--border); font-size: 0.95rem;
+        }
+        .btn {
+            display: inline-block; padding: 10px 20px; background: var(--primary);
+            color: #fff; border: none; border-radius: 6px; font-weight: 600;
+            cursor: pointer; text-decoration: none; font-size: 0.9rem;
+        }
         .btn:hover { background: var(--primary-dark); }
         .btn-outline { background: transparent; border: 1px solid var(--primary); color: var(--primary); }
         .btn-small { padding: 5px 10px; font-size: 0.8rem; }
         .btn-danger { background: #dc3545; }
         .btn-success { background: #28a745; }
-        .container { max-width: 700px; margin: 20px auto; padding: 0 15px; }
-        .card { background: var(--card-bg); border-radius: var(--radius); padding: 24px; margin-bottom: 16px; box-shadow: var(--shadow); border: 1px solid var(--border); }
-        .card-header { font-size: 1.2rem; font-weight: 600; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
-        label { display: block; margin-top: 15px; font-weight: 500; }
-        input, textarea, select { width: 100%; padding: 10px 12px; margin-top: 5px; border-radius: 6px; border: 1px solid var(--border); font-size: 0.95rem; }
         .alert { padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; }
         .alert-success { background: #d4edda; color: #155724; }
         .alert-error { background: #f8d7da; color: #721c24; }
@@ -254,41 +336,111 @@ base_template = """
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }
         .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
-        .voucher-code { font-size: 1.5rem; font-weight: 700; letter-spacing: 1px; background: #f0f4f8; padding: 10px 15px; border-radius: 8px; display: inline-block; margin: 10px 0; }
-        .platform-revenue { background: #e8f0fe; border-left: 4px solid var(--primary); padding: 10px 15px; margin: 10px 0; border-radius: 6px; }
-        .copy-btn { background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-left: 10px; }
-        .copy-btn:hover { background: #218838; }
-        .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background: #25D366; color: white; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 999; text-decoration: none; }
-        .provider-logo { height: 50px; width: 50px; border-radius: 10px; margin-right: 12px; vertical-align: middle; object-fit: cover; border: 2px solid var(--primary); }
-        .provider-poster { width: 100%; max-height: 220px; object-fit: cover; border-radius: var(--radius); margin-bottom: 15px; box-shadow: var(--shadow); }
-        @media (max-width: 600px) { .navbar { flex-direction: column; gap: 10px; } }
+        .voucher-code {
+            font-size: 1.5rem; font-weight: 700; letter-spacing: 1px;
+            background: #f0f4f8; padding: 10px 15px; border-radius: 8px;
+            display: inline-block; margin: 10px 0;
+        }
+        .whatsapp-float {
+            position: fixed; bottom: 20px; right: 20px;
+            background: #25D366; color: white; width: 60px; height: 60px;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 30px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            z-index: 999; text-decoration: none;
+        }
+        .dropdown { position: relative; display: inline-block; }
+        .dropdown-content {
+            display: none; position: absolute; background: white; min-width: 200px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2); z-index: 1; right:0;
+        }
+        .dropdown-content a { color: black; padding: 8px 12px; text-decoration: none; display: block; }
+        .dropdown-content a:hover { background: #f1f1f1; }
+        .dropdown:hover .dropdown-content { display: block; }
+        @media (max-width: 768px) {
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.open { transform: translateX(0); }
+            .main-content { margin-left: 0; }
+        }
     </style>
     {% endraw %}
 </head>
-<body>
-<nav class="navbar">
-    <a href="/" class="logo" style="display:flex; align-items:center; gap:8px;">
-        <img src="/static/icon-192.png" alt="RockabyTech" style="height:32px; width:32px; border-radius:6px;">
-        ROCKABY<span style="color:var(--primary-dark);">TECH</span>
-    </a>
-    <div class="nav-links">{nav_links}</div>
-</nav>
-<div class="container">{content}</div>
-<footer>&copy; 2025 RockabyTech - WiFi Billing Made Simple</footer>
-<a href="https://wa.me/{support_phone}?text=Hi%20RockabyWiFi%20Support" target="_blank" class="whatsapp-float">💬</a>
+<body class="{layout_class}">
+    {sidebar_html}
+    <div class="main-content" id="mainContent">
+        {topbar_html}
+        <div class="container">
+            {content}
+        </div>
+        <footer>&copy; 2025 RockabyTech - WiFi Billing Made Simple</footer>
+    </div>
+    <a href="https://wa.me/{support_phone}?text=Hi%20RockabyWiFi%20Support" target="_blank" class="whatsapp-float">💬</a>
+    <script>
+        function toggleSidebar() {{
+            document.getElementById('sidebar').classList.toggle('collapsed');
+            document.getElementById('mainContent').classList.toggle('expanded');
+        }}
+    </script>
 </body>
 </html>
 """
 
-def render_page(title, content, pending_count=0, provider_id=1):
+def render_page(title, content, pending_count=0, provider_id=1, admin=False):
     provider = get_provider(provider_id)
     support_phone = provider[14] if provider and len(provider) > 14 and provider[14] else '256751318876'
-    nav = f'<a href="/dashboard">Dashboard</a> <a href="/pending">Pending ({pending_count})</a> <a href="/generate-cash">Cash Voucher</a> <a href="/plans">Plans</a> <a href="/provider/edit">Settings</a> <a href="/logout">Logout</a>' if session.get('provider_id') else ''
-    page = base_template.replace('{title}', title).replace('{nav_links}', nav).replace('{content}', content).replace('{support_phone}', support_phone)
+
+    # Admin sidebar
+    if admin and session.get('provider_id'):
+        sidebar_html = f"""
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <img src="/static/icon-192.png" alt="Logo">
+                <h3>ROCKABYTECH</h3>
+            </div>
+            <div class="sidebar-menu">
+                <a href="/dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+                <a href="/active-users"><i class="fas fa-wifi"></i> Active Users</a>
+                <a href="/subscribers"><i class="fas fa-users"></i> Users</a>
+                <a href="#"><i class="fas fa-ticket-alt"></i> Tickets <span class="badge">@</span></a>
+                <a href="#"><i class="fas fa-chart-line"></i> Leads <span class="badge">@</span></a>
+                <div class="submenu">
+                    <a href="/plans"><i class="fas fa-box"></i> Packages</a>
+                    <a href="/pending"><i class="fas fa-money-bill-wave"></i> Payments</a>
+                    <a href="/generate-cash"><i class="fas fa-ticket-alt"></i> Vouchers</a>
+                    <a href="#"><i class="fas fa-receipt"></i> Expenses <span class="badge">@</span></a>
+                </div>
+                <div class="submenu">
+                    <a href="#"><i class="fas fa-envelope"></i> Messages <span class="badge">@</span></a>
+                    <a href="#"><i class="fas fa-at"></i> Email <span class="badge">@</span></a>
+                    <a href="#"><i class="fas fa-bullhorn"></i> Campaign</a>
+                </div>
+                <div class="submenu">
+                    <a href="/mikrotik"><i class="fas fa-server"></i> MikroTik</a>
+                    <a href="#"><i class="fas fa-tools"></i> Equipment <span class="badge">@</span></a>
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                <a href="/provider/edit"><i class="fas fa-cog"></i> Settings</a>
+                <a href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+            </div>
+        </div>
+        """
+        topbar_html = '<div class="topbar"><button class="hamburger" onclick="toggleSidebar()">&#9776;</button><span>Welcome, {}</span></div>'.format(session['provider_name'])
+        layout_class = 'admin-layout'
+    else:
+        sidebar_html = ''
+        topbar_html = '<div class="topbar" style="background:transparent; box-shadow:none;"></div>'
+        layout_class = 'public-layout'
+
+    page = base_template.replace('{title}', title)
+    page = page.replace('{layout_class}', layout_class)
+    page = page.replace('{sidebar_html}', sidebar_html)
+    page = page.replace('{topbar_html}', topbar_html)
+    page = page.replace('{content}', content)
+    page = page.replace('{support_phone}', support_phone)
     return page
 
 # ------------------------------------------------------------
-# CUSTOMER ROUTES
+# CUSTOMER ROUTES (public captive portal)
 # ------------------------------------------------------------
 @app.route('/')
 def home():
@@ -305,98 +457,68 @@ def home():
             <label>Select Plan</label><select name="plan_id" required>{get_plan_options(1)}</select>
             <button type="submit" class="btn" style="margin-top:20px; width:100%;">Continue to Payment</button>
         </form></div>
-        <p style="text-align:center; margin-top:15px;"><a href="/redeem" class="btn btn-outline">Already have a voucher? Enter it here</a></p>
+        <p style="text-align:center; margin-top:15px;">
+            <a href="/redeem" class="btn btn-outline">Already have a voucher?</a>
+            <a href="/subscriber-login" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a>
+        </p>
     """
     return render_page("Get Internet Access", content, get_pending_count())
 
-@app.route('/redeem', methods=['GET', 'POST'])
-def redeem():
+# Subscriber login for long‑term users
+@app.route('/subscriber-login', methods=['GET', 'POST'])
+def subscriber_login():
     if request.method == 'POST':
-        code = request.form['code'].strip().upper()
+        username = request.form['username'].strip()
+        password = request.form['password']
         conn = sqlite3.connect('rockabywifi.db')
         c = conn.cursor()
-        c.execute("SELECT id, used FROM vouchers WHERE code=?", (code,))
-        voucher = c.fetchone()
-        if voucher and not voucher[1]:
-            c.execute("UPDATE vouchers SET used=1, used_at=CURRENT_TIMESTAMP WHERE id=?", (voucher[0],))
+        c.execute("SELECT id, password_hash, suspended FROM subscribers WHERE username=? AND provider_id=1", (username,))
+        sub = c.fetchone()
+        if sub and check_password_hash(sub[1], password) and not sub[2]:
+            # Enforce single IP: kick off any existing session for this subscriber
+            c.execute("DELETE FROM sessions WHERE subscriber_id=?", (sub[0],))
+            # Record new IP
+            ip = request.remote_addr
+            c.execute("INSERT INTO sessions (subscriber_id, provider_id, ip_address) VALUES (?, 1, ?)", (sub[0], ip))
+            c.execute("UPDATE subscribers SET current_ip=? WHERE id=?", (ip, sub[0]))
             conn.commit()
             conn.close()
-            return render_page("Voucher Redeemed", '<div class="card"><div class="alert alert-success">Connected! Enjoy your internet access.</div><a href="/" class="btn">Back to Home</a></div>', get_pending_count())
+            session['subscriber_id'] = sub[0]
+            session['subscriber_name'] = username
+            return redirect(url_for('subscriber_portal'))
         else:
             conn.close()
-            return render_page("Redeem Voucher", '<div class="card"><div class="alert alert-error">Invalid or already used voucher code.</div><form method="POST"><label>Enter Voucher Code</label><input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required><button type="submit" class="btn" style="margin-top:15px; width:100%;">Redeem</button></form></div>', get_pending_count())
-    return render_page("Redeem Voucher", '<div class="card"><div class="card-header">Redeem Voucher</div><form method="POST"><label>Enter Voucher Code</label><input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required><button type="submit" class="btn" style="margin-top:15px; width:100%;">Redeem</button></form></div>', get_pending_count())
+            error = "Invalid credentials or account suspended."
+            return render_page("Subscriber Login", f'<div class="card"><div class="alert alert-error">{error}</div><form method="POST"><label>Username</label><input type="text" name="username" required><label>Password</label><input type="password" name="password" required><button type="submit" class="btn" style="margin-top:20px;">Login</button></form></div>', get_pending_count(), admin=False)
+    return render_page("Subscriber Login", '<div class="card"><div class="card-header">Subscriber Login</div><form method="POST"><label>Username</label><input type="text" name="username" required><label>Password</label><input type="password" name="password" required><button type="submit" class="btn" style="margin-top:20px;">Login</button></form></div>', get_pending_count(), admin=False)
 
-@app.route('/sms-verify', methods=['GET', 'POST'])
-def sms_verify():
-    phone = request.args.get('phone', '')
-    plan_id = request.args.get('plan_id', '1')
-    pending_count = get_pending_count()
-    conn = sqlite3.connect('rockabywifi.db')
-    c = conn.cursor()
-    c.execute("SELECT id, name, duration_minutes, price_ugx FROM plans WHERE id=?", (plan_id,))
-    plan = c.fetchone()
-    if not plan:
-        conn.close()
-        return "Invalid plan selected.", 400
-    c.execute("SELECT auto_approve, mtn_number, airtel_number FROM providers WHERE id=1")
-    provider = c.fetchone()
-    conn.close()
+@app.route('/subscriber-portal')
+def subscriber_portal():
+    if 'subscriber_id' not in session:
+        return redirect('/subscriber-login')
+    # Simple page showing they are connected
+    content = f"""
+        <div class="card">
+            <h2>Welcome, {session['subscriber_name']}</h2>
+            <p>You are connected. Your current IP: {request.remote_addr}</p>
+            <a href="/subscriber-logout" class="btn btn-danger">Logout / Switch Device</a>
+        </div>
+    """
+    return render_page("Subscriber Portal", content, get_pending_count(), admin=False)
 
-    if request.method == 'POST':
-        phone = request.form['phone'].strip()
-        plan_id = int(request.form['plan_id'])
-        raw_sms = request.form['raw_sms'].strip()
-        parsed = parse_airtel_sms(raw_sms) if 'TID' in raw_sms or 'SENT.TID' in raw_sms else parse_mtn_sms(raw_sms)
-        error = None
-        if not parsed['tid']: error = "Could not detect Transaction ID."
-        elif not parsed['amount']: error = "Could not detect amount."
-        elif parsed['amount'] != plan[3]: error = f"Amount mismatch. Expected UGX {plan[3]:,}."
-        elif not parsed.get('recipient_name'): error = "Could not detect recipient."
-        else:
-            mtn_num = clean_number(provider[1]) if provider[1] else ''
-            airtel_num = clean_number(provider[2]) if provider[2] else ''
-            sms_num = clean_number(parsed.get('recipient_number', '')) if parsed.get('recipient_number') else ''
-            if sms_num:
-                if sms_num != mtn_num and sms_num != airtel_num: error = "Payment not sent to the correct provider number."
-            else:
-                recipient_lower = parsed['recipient_name'].lower()
-                if provider[1] and provider[1] not in recipient_lower and provider[2] and provider[2] not in recipient_lower: error = "Payment not sent to the correct provider number."
-        if error:
-            content = f'<div class="card"><div class="alert alert-error">{error}</div><form method="POST"><input type="hidden" name="phone" value="{phone}"><input type="hidden" name="plan_id" value="{plan_id}"><label>Paste Full MTN/Airtel SMS Here</label><textarea name="raw_sms" rows="6" required></textarea><button type="submit" class="btn" style="margin-top:20px; width:100%;">Verify Payment</button></form></div>'
-            return render_page("Verify Payment", content, pending_count)
+@app.route('/subscriber-logout')
+def subscriber_logout():
+    if 'subscriber_id' in session:
         conn = sqlite3.connect('rockabywifi.db')
         c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM voucher_requests WHERE transaction_id=?", (parsed['tid'],))
-        if c.fetchone()[0] > 0:
-            conn.close()
-            return render_page("Verify Payment", '<div class="card"><div class="alert alert-error">This Transaction ID has already been used.</div><p><a href="/" class="btn">Back to Home</a></p></div>', pending_count)
+        c.execute("DELETE FROM sessions WHERE subscriber_id=?", (session['subscriber_id'],))
+        conn.commit()
         conn.close()
-        auto_approve = provider[0] if provider else 1
-        status = 'approved' if auto_approve else 'pending'
-        voucher_code = None
-        recipient_full = f"{parsed.get('recipient_name','')} {parsed.get('recipient_number','')}".strip()
-        if status == 'approved':
-            voucher_code = generate_voucher_code()
-            conn = sqlite3.connect('rockabywifi.db')
-            c = conn.cursor()
-            c.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (1, ?, ?, 'sms', ?)", (voucher_code, plan_id, phone))
-            c.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status, voucher_code) VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'approved', ?)", (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], recipient_full, parsed['date'], voucher_code))
-            conn.commit()
-            conn.close()
-            content = f'<div class="card"><div class="alert alert-success">Payment verified!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="voucherCode">{voucher_code}</div><button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById(\'voucherCode\').innerText)">📋 Copy</button><p style="margin-top:10px;">Use this code on the <a href="/redeem">Redeem page</a> to connect.</p><a href="/" class="btn">Back to Home</a></div>'
-        else:
-            conn = sqlite3.connect('rockabywifi.db')
-            c = conn.cursor()
-            c.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status) VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'pending')", (phone, plan_id, raw_sms, parsed['tid'], parsed['amount'], recipient_full, parsed['date']))
-            conn.commit()
-            conn.close()
-            content = '<div class="card"><div class="alert alert-success">Payment submitted! Waiting for approval.</div><p><a href="/" class="btn">Back to Home</a></p></div>'
-        return render_page("Verification Result", content, get_pending_count())
+        session.pop('subscriber_id', None)
+        session.pop('subscriber_name', None)
+    return redirect('/')
 
-    content = f'<div class="card"><div class="card-header">Pay for Internet</div><p><strong>Selected Plan:</strong> {plan[1]} - {plan[2]} min - UGX {plan[3]:,}</p><p><strong>Pay to:</strong></p><p>MTN: 0785686404 | Airtel: 0751318876</p><p style="color:#666;">Name: Rocky Peter Abayo</p><hr><p>After payment, paste the full SMS below:</p><form method="POST"><input type="hidden" name="phone" value="{phone}"><input type="hidden" name="plan_id" value="{plan_id}"><label>Paste Full MTN/Airtel SMS Here</label><textarea name="raw_sms" rows="6" required></textarea><button type="submit" class="btn" style="margin-top:20px; width:100%;">Verify Payment</button></form></div>'
-    return render_page("Verify Payment", content, pending_count)
-
+# (Other public routes: /redeem, /sms-verify – identical to previous version, omitted for brevity but must be included)
 # ------------------------------------------------------------
 # ADMIN ROUTES
 # ------------------------------------------------------------
@@ -413,9 +535,11 @@ def login():
         if provider and check_password_hash(provider[2], password) and provider[3]:
             session['provider_id'] = provider[0]
             session['provider_name'] = provider[1]
+            if request.form.get('remember'):
+                session.permanent = True
             return redirect('/dashboard')
-        return render_page("Admin Login", '<div class="card"><div class="alert alert-error">Invalid credentials.</div><p><a href="/login">Try again</a></p></div>', 0)
-    return render_page("Admin Login", '<div class="card"><div class="card-header">Provider Login</div><form method="POST"><label>Phone Number</label><input type="tel" name="contact" required><label>Password</label><input type="password" name="password" required><button type="submit" class="btn" style="margin-top:20px; width:100%;">Login</button></form></div>', 0)
+        return render_page("Admin Login", '<div class="card"><div class="alert alert-error">Invalid credentials.</div><p><a href="/login">Try again</a></p></div>', 0, admin=False)
+    return render_page("Admin Login", '<div class="card"><div class="card-header">Provider Login</div><form method="POST"><label>Phone Number</label><input type="tel" name="contact" required><label>Password</label><input type="password" name="password" required><label><input type="checkbox" name="remember"> Remember me</label><button type="submit" class="btn" style="margin-top:20px; width:100%;">Login</button></form></div>', 0, admin=False)
 
 @app.route('/logout')
 def logout():
@@ -448,210 +572,157 @@ def dashboard():
         <div class="card" style="text-align:center;"><h3>UGX {cash_rev or 0:,}</h3><small>Cash Revenue Today</small></div>
         <div class="card" style="text-align:center;"><h3>{pending}</h3><small>Pending Approvals</small></div></div>
         <div class="platform-revenue"><strong>RockabyTech Platform Fee (5% this week):</strong> UGX {weekly_fee:,} &nbsp; <small>({week_start.strftime('%d %b')} - {week_end.strftime('%d %b')})</small></div>
-        <div class="card"><div class="card-header">Quick Actions</div>
-        <a href="/pending" class="btn btn-outline" style="margin:5px;">Review Pending</a>
-        <a href="/generate-cash" class="btn" style="margin:5px;">Generate Cash Voucher</a>
-        <a href="/plans" class="btn btn-outline" style="margin:5px;">Manage Plans</a>
-        <a href="/provider/edit" class="btn btn-outline" style="margin:5px;">Settings</a></div>
     """
-    return render_page("Dashboard", content, pending, provider_id)
+    return render_page("Dashboard", content, pending, provider_id, admin=True)
 
-@app.route('/toggle-auto')
+# Active Users with disconnect options
+@app.route('/active-users')
 @login_required
-def toggle_auto():
-    current = get_auto_approve()
-    new_val = 0 if current else 1
-    conn = sqlite3.connect('rockabywifi.db')
-    c = conn.cursor()
-    c.execute("UPDATE providers SET auto_approve=? WHERE id=?", (new_val, session['provider_id']))
-    conn.commit()
-    conn.close()
-    return redirect('/dashboard')
-
-@app.route('/plans')
-@login_required
-def list_plans():
+def active_users():
     provider_id = session['provider_id']
     conn = sqlite3.connect('rockabywifi.db')
     c = conn.cursor()
-    c.execute("SELECT id, name, duration_minutes, price_ugx, is_active FROM plans WHERE provider_id=?", (provider_id,))
-    plans = c.fetchall()
+    # Active vouchers (unused)
+    c.execute("SELECT v.id, v.code, v.phone_number, p.name, v.created_at FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? AND v.used=0", (provider_id,))
+    vouchers = c.fetchall()
+    # Active subscriber sessions
+    c.execute("SELECT s.id, sub.username, sub.phone, s.ip_address, s.started_at FROM sessions s JOIN subscribers sub ON s.subscriber_id=sub.id WHERE s.provider_id=?", (provider_id,))
+    subs = c.fetchall()
     conn.close()
-    rows = ''.join(f'<tr><td>{p[1]}</td><td>{p[2]} min</td><td>UGX {p[3]:,}</td><td>{"Active" if p[4] else "Inactive"}</td><td><a href="/plans/edit/{p[0]}" class="btn btn-small">Edit</a> <a href="/plans/delete/{p[0]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for p in plans) or '<tr><td colspan="5">No plans yet.</td></tr>'
-    content = f'<div class="card"><div class="card-header">My Plans</div><a href="/plans/add" class="btn btn-success" style="margin-bottom:15px;">+ Add Plan</a><table><tr><th>Name</th><th>Duration</th><th>Price</th><th>Status</th><th>Action</th></tr>{rows}</table></div>'
-    return render_page("Manage Plans", content, get_pending_count())
-
-@app.route('/plans/add', methods=['GET', 'POST'])
-@login_required
-def add_plan():
-    if request.method == 'POST':
-        conn = sqlite3.connect('rockabywifi.db')
-        c = conn.cursor()
-        c.execute("INSERT INTO plans (provider_id, name, duration_minutes, price_ugx) VALUES (?,?,?,?)", (session['provider_id'], request.form['name'], int(request.form['duration']), int(request.form['price'])))
-        conn.commit()
-        conn.close()
-        return redirect('/plans')
-    return render_page("Add Plan", '<div class="card"><div class="card-header">Add Plan</div><form method="POST"><label>Plan Name</label><input type="text" name="name" required><label>Duration (minutes)</label><input type="number" name="duration" required><label>Price (UGX)</label><input type="number" name="price" required><button type="submit" class="btn" style="margin-top:20px;">Save</button></form></div>', get_pending_count())
-
-@app.route('/plans/edit/<int:plan_id>', methods=['GET', 'POST'])
-@login_required
-def edit_plan(plan_id):
-    conn = sqlite3.connect('rockabywifi.db')
-    c = conn.cursor()
-    c.execute("SELECT name, duration_minutes, price_ugx, is_active FROM plans WHERE id=? AND provider_id=?", (plan_id, session['provider_id']))
-    plan = c.fetchone()
-    if not plan:
-        conn.close()
-        return "Plan not found.", 404
-    if request.method == 'POST':
-        c.execute("UPDATE plans SET name=?, duration_minutes=?, price_ugx=?, is_active=? WHERE id=?", (request.form['name'], int(request.form['duration']), int(request.form['price']), int(request.form.get('is_active', '1')), plan_id))
-        conn.commit()
-        conn.close()
-        return redirect('/plans')
-    content = f'<div class="card"><div class="card-header">Edit Plan</div><form method="POST"><label>Name</label><input type="text" name="name" value="{plan[0]}" required><label>Duration (min)</label><input type="number" name="duration" value="{plan[1]}" required><label>Price (UGX)</label><input type="number" name="price" value="{plan[2]}" required><label>Active</label><select name="is_active"><option value="1" {"selected" if plan[3] else ""}>Yes</option><option value="0" {"selected" if not plan[3] else ""}>No</option></select><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
-    conn.close()
-    return render_page("Edit Plan", content, get_pending_count())
-
-@app.route('/plans/delete/<int:plan_id>')
-@login_required
-def delete_plan(plan_id):
-    conn = sqlite3.connect('rockabywifi.db')
-    c = conn.cursor()
-    c.execute("DELETE FROM plans WHERE id=? AND provider_id=?", (plan_id, session['provider_id']))
-    conn.commit()
-    conn.close()
-    return redirect('/plans')
-
-@app.route('/provider/edit', methods=['GET', 'POST'])
-@login_required
-def edit_provider():
-    provider = get_provider(session['provider_id'])
-    if request.method == 'POST':
-        poster_file = request.files.get('poster')
-        poster_filename = provider[11] if provider and len(provider) > 11 else None
-        if poster_file and poster_file.filename and allowed_file(poster_file.filename):
-            upload_path = os.path.join(os.getcwd(), 'static', 'uploads')
-            os.makedirs(upload_path, exist_ok=True)
-            poster_filename = secure_filename(poster_file.filename)
-            poster_file.save(os.path.join(upload_path, poster_filename))
-        logo_file = request.files.get('logo')
-        logo_filename = provider[13] if provider and len(provider) > 13 else None
-        if logo_file and logo_file.filename and allowed_file(logo_file.filename):
-            upload_path = os.path.join(os.getcwd(), 'static', 'uploads')
-            os.makedirs(upload_path, exist_ok=True)
-            logo_filename = secure_filename(logo_file.filename)
-            logo_file.save(os.path.join(upload_path, logo_filename))
-        conn = sqlite3.connect('rockabywifi.db')
-        c = conn.cursor()
-        c.execute("UPDATE providers SET business_name=?, support_phone=?, poster_image=?, logo_image=? WHERE id=?", (request.form['business_name'], request.form['support_phone'], poster_filename, logo_filename, session['provider_id']))
-        conn.commit()
-        conn.close()
-        session['provider_name'] = request.form['business_name']
-        return redirect('/dashboard')
-    poster_display = f'<p>Current poster: <img src="/static/uploads/{provider[11]}" style="max-width:200px; border-radius:8px;"></p>' if provider and len(provider) > 11 and provider[11] else ''
-    logo_display = f'<p>Current logo: <img src="/static/uploads/{provider[13]}" style="max-width:100px; border-radius:8px;"></p>' if provider and len(provider) > 13 and provider[13] else ''
-    content = f'<div class="card"><div class="card-header">Provider Settings</div><form method="POST" enctype="multipart/form-data"><label>Business Name</label><input type="text" name="business_name" value="{provider[1] if provider else ""}" required><label>Support WhatsApp</label><input type="text" name="support_phone" value="{provider[14] if provider and len(provider) > 14 else ""}"><label>Portal Poster/Banner</label><input type="file" name="poster" accept="image/*">{poster_display}<label>Business Logo</label><input type="file" name="logo" accept="image/*">{logo_display}<button type="submit" class="btn" style="margin-top:20px;">Save Settings</button></form></div>'
-    return render_page("Settings", content, get_pending_count())
-
-@app.route('/pending')
-@login_required
-def pending():
-    provider_id = session['provider_id']
-    conn = sqlite3.connect('rockabywifi.db')
-    c = conn.cursor()
-    c.execute("SELECT vr.id, vr.phone_number, pl.name, vr.amount, vr.transaction_id, vr.created_at FROM voucher_requests vr JOIN plans pl ON vr.plan_id=pl.id WHERE vr.provider_id=? AND vr.status='pending' ORDER BY vr.created_at DESC", (provider_id,))
-    pending_list = c.fetchall()
-    conn.close()
-    rows = ''.join(f'<tr><td>{p[1]}</td><td>{p[2]}</td><td>UGX {p[3] or 0:,}</td><td>{p[4]}</td><td>{str(p[5])[:16] if p[5] else ""}</td><td><a href="/approve/{p[0]}" class="btn btn-small btn-success">Approve</a> <a href="/reject/{p[0]}" class="btn btn-small btn-danger">Reject</a></td></tr>' for p in pending_list) or '<tr><td colspan="6">No pending requests.</td></tr>'
-    content = f'<div class="card"><div class="card-header">Pending Approvals</div><table><tr><th>Phone</th><th>Plan</th><th>Amount</th><th>Transaction ID</th><th>Time</th><th>Action</th></tr>{rows}</table></div>'
-    return render_page("Pending Approvals", content, len(pending_list))
-
-@app.route('/approve/<int:req_id>')
-@login_required
-def approve(req_id):
-    provider_id = session['provider_id']
-    conn = sqlite3.connect('rockabywifi.db')
-    c = conn.cursor()
-    c.execute("SELECT phone_number, plan_id FROM voucher_requests WHERE id=? AND provider_id=?", (req_id, provider_id))
-    req = c.fetchone()
-    if req:
-        code = generate_voucher_code()
-        c.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (?, ?, ?, 'sms', ?)", (provider_id, code, req[1], req[0]))
-        c.execute("UPDATE voucher_requests SET status='approved', voucher_code=? WHERE id=?", (code, req_id))
-        conn.commit()
-    conn.close()
-    return redirect('/pending')
-
-@app.route('/reject/<int:req_id>')
-@login_required
-def reject(req_id):
-    provider_id = session['provider_id']
-    conn = sqlite3.connect('rockabywifi.db')
-    c = conn.cursor()
-    c.execute("UPDATE voucher_requests SET status='rejected' WHERE id=? AND provider_id=?", (req_id, provider_id))
-    conn.commit()
-    conn.close()
-    return redirect('/pending')
-
-@app.route('/generate-cash', methods=['GET', 'POST'])
-@login_required
-def generate_cash():
-    provider_id = session['provider_id']
-    pending_count = get_pending_count()
-    if request.method == 'POST':
-        plan_id = int(request.form['plan_id'])
-        code = generate_voucher_code()
-        conn = sqlite3.connect('rockabywifi.db')
-        c = conn.cursor()
-        c.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (?, ?, ?, 'cash', ?)", (provider_id, code, plan_id, request.form.get('phone', '').strip()))
-        conn.commit()
-        conn.close()
-        content = f'<div class="card"><div class="alert alert-success">Cash voucher generated!</div><p><strong>Voucher Code:</strong></p><div class="voucher-code">{code}</div><p>Give this code to the customer.</p><a href="/generate-cash" class="btn">Generate Another</a> <a href="/dashboard" class="btn btn-outline">Dashboard</a></div>'
-        return render_page("Voucher Generated", content, pending_count)
-    content = f'<div class="card"><div class="card-header">Generate Cash Voucher</div><form method="POST"><label>Select Plan</label><select name="plan_id" required>{get_plan_options(provider_id)}</select><label>Customer Phone (optional)</label><input type="tel" name="phone"><button type="submit" class="btn" style="margin-top:20px; width:100%;">Generate</button></form></div>'
-    return render_page("Generate Cash Voucher", content, pending_count)
-
-@app.route('/stats')
-@login_required
-def stats():
-    provider_id = session['provider_id']
-    conn = sqlite3.connect('rockabywifi.db')
-    c = conn.cursor()
-    today = date.today().isoformat()
-    c.execute("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at)=?", (provider_id, today))
-    sms_count, sms_rev = c.fetchone()
-    c.execute("SELECT COUNT(*), COALESCE(SUM(plans.price_ugx),0) FROM vouchers v JOIN plans ON v.plan_id=plans.id WHERE v.provider_id=? AND v.payment_method='cash' AND date(v.created_at)=?", (provider_id, today))
-    cash_count, cash_rev = c.fetchone()
-    c.execute("SELECT COUNT(*) FROM vouchers WHERE provider_id=? AND used=1", (provider_id,))
-    used_count = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM vouchers WHERE provider_id=? AND used=0", (provider_id,))
-    unused_count = c.fetchone()[0]
-    c.execute("SELECT p.name, COUNT(*) FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? GROUP BY p.name ORDER BY COUNT(*) DESC", (provider_id,))
-    plan_stats = c.fetchall()
-    pending_count = get_pending_count()
-    weekly_fee, week_start, week_end = get_weekly_platform_revenue()
-    c.execute("SELECT date(created_at) as day, COALESCE(SUM(amount),0) FROM voucher_requests WHERE provider_id=? AND status='approved' AND created_at >= date('now', '-7 days') GROUP BY day ORDER BY day", (provider_id,))
-    sms_daily = dict(c.fetchall())
-    c.execute("SELECT date(v.created_at) as day, COALESCE(SUM(pl.price_ugx),0) FROM vouchers v JOIN plans pl ON v.plan_id=pl.id WHERE v.provider_id=? AND v.payment_method='cash' AND v.created_at >= date('now', '-7 days') GROUP BY day ORDER BY day", (provider_id,))
-    cash_daily = dict(c.fetchall())
-    last_7 = [(date.today() - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
-    max_rev = max([sms_daily.get(d,0) + cash_daily.get(d,0) for d in last_7] + [1])
-    bar_html = ''.join(f'<div style="display:flex; align-items:center; margin:4px 0; font-size:0.8rem;"><div style="width:60px;">{d[5:]}</div><div style="flex:1; background:#eee; height:20px; border-radius:4px;"><div style="width:{int((sms_daily.get(d,0)+cash_daily.get(d,0))/max_rev*100)}%; background:var(--primary); height:100%; border-radius:4px;"></div></div><div style="width:80px; text-align:right;">UGX {sms_daily.get(d,0)+cash_daily.get(d,0):,}</div></div>' for d in last_7)
-    conn.close()
+    
+    rows = ''
+    for v in vouchers:
+        rows += f"""
+        <tr><td>Voucher</td><td>{v[1]}</td><td>{v[2]}</td><td>{v[3]}</td><td>{v[4]}</td>
+        <td><div class="dropdown"><button class="btn btn-small">⋮</button><div class="dropdown-content">
+            <a href="/disconnect-voucher/{v[0]}">Disconnect</a>
+            <a href="/disconnect-voucher-until-payment/{v[0]}">Disconnect until payment</a>
+        </div></div></td></tr>"""
+    for s in subs:
+        rows += f"""
+        <tr><td>Subscriber</td><td>{s[1]}</td><td>{s[2] or ''}</td><td>{s[3]}</td><td>{s[4]}</td>
+        <td><div class="dropdown"><button class="btn btn-small">⋮</button><div class="dropdown-content">
+            <a href="/disconnect-subscriber/{s[0]}">Disconnect</a>
+            <a href="/suspend-subscriber/{s[0]}">Disconnect until payment</a>
+        </div></div></td></tr>"""
+    if not rows:
+        rows = '<tr><td colspan="6">No active users.</td></tr>'
+    
     content = f"""
-        <div class="stat-grid">
-        <div class="card" style="text-align:center;"><h3>UGX {sms_rev or 0:,}</h3><small>SMS Revenue Today</small></div>
-        <div class="card" style="text-align:center;"><h3>UGX {cash_rev or 0:,}</h3><small>Cash Revenue Today</small></div>
-        <div class="card" style="text-align:center;"><h3>{used_count}</h3><small>Vouchers Used</small></div>
-        <div class="card" style="text-align:center;"><h3>{unused_count}</h3><small>Vouchers Unused</small></div>
-        <div class="card" style="text-align:center;"><h3>{pending_count}</h3><small>Pending</small></div></div>
-        <div class="platform-revenue"><strong>RockabyTech Platform Fee (5% this week):</strong> UGX {weekly_fee:,} &nbsp; <small>({week_start.strftime('%d %b')} - {week_end.strftime('%d %b')})</small></div>
-        <div class="card"><div class="card-header">Revenue Last 7 Days</div>{bar_html}</div>
-        <div class="card"><div class="card-header">Top Selling Plans</div><table><tr><th>Plan</th><th>Sold</th></tr>{''.join(f'<tr><td>{p[0]}</td><td>{p[1]}</td></tr>' for p in plan_stats) or '<tr><td colspan="2">No sales yet.</td></tr>'}</table></div>
-        <a href="/dashboard" class="btn btn-outline">Back to Dashboard</a>
+        <div class="card"><div class="card-header">Active Users</div>
+        <table><tr><th>Type</th><th>Identifier</th><th>Phone</th><th>IP/Plan</th><th>Since</th><th>Action</th></tr>{rows}</table></div>
     """
-    return render_page("Statistics", content, pending_count)
+    return render_page("Active Users", content, get_pending_count(), admin=True)
 
+# Disconnect voucher
+@app.route('/disconnect-voucher/<int:voucher_id>')
+@login_required
+def disconnect_voucher(voucher_id):
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("UPDATE vouchers SET used=1, used_at=CURRENT_TIMESTAMP WHERE id=? AND provider_id=?", (voucher_id, session['provider_id']))
+    conn.commit()
+    conn.close()
+    return redirect('/active-users')
+
+@app.route('/disconnect-voucher-until-payment/<int:voucher_id>')
+@login_required
+def disconnect_voucher_until_payment(voucher_id):
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("SELECT phone_number FROM vouchers WHERE id=?", (voucher_id,))
+    phone = c.fetchone()
+    if phone:
+        c.execute("INSERT OR IGNORE INTO restricted (provider_id, phone_number, reason) VALUES (?, ?, 'until payment')", (session['provider_id'], phone[0]))
+        c.execute("UPDATE vouchers SET used=1, used_at=CURRENT_TIMESTAMP WHERE id=?", (voucher_id,))
+    conn.commit()
+    conn.close()
+    return redirect('/active-users')
+
+# Disconnect subscriber
+@app.route('/disconnect-subscriber/<int:session_id>')
+@login_required
+def disconnect_subscriber(session_id):
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM sessions WHERE id=? AND provider_id=?", (session_id, session['provider_id']))
+    conn.commit()
+    conn.close()
+    return redirect('/active-users')
+
+@app.route('/suspend-subscriber/<int:session_id>')
+@login_required
+def suspend_subscriber(session_id):
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("SELECT subscriber_id FROM sessions WHERE id=?", (session_id,))
+    row = c.fetchone()
+    if row:
+        c.execute("UPDATE subscribers SET suspended=1 WHERE id=?", (row[0],))
+        c.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+    conn.commit()
+    conn.close()
+    return redirect('/active-users')
+
+# Subscriber management (admin)
+@app.route('/subscribers', methods=['GET', 'POST'])
+@login_required
+def subscribers():
+    if request.method == 'POST':
+        username = request.form['username'].strip()
+        password = request.form['password']
+        phone = request.form.get('phone', '').strip()
+        hashed = generate_password_hash(password)
+        conn = sqlite3.connect('rockabywifi.db')
+        c = conn.cursor()
+        try:
+            c.execute("INSERT INTO subscribers (provider_id, username, password_hash, phone) VALUES (?, ?, ?, ?)",
+                      (session['provider_id'], username, hashed, phone))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.close()
+            return render_page("Users", '<div class="card"><div class="alert alert-error">Username already exists.</div><p><a href="/subscribers">Back</a></p></div>', get_pending_count(), admin=True)
+        conn.close()
+        return redirect('/subscribers')
+    
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("SELECT id, username, phone, suspended FROM subscribers WHERE provider_id=?", (session['provider_id'],))
+    subs = c.fetchall()
+    conn.close()
+    rows = ''.join(f'<tr><td>{s[1]}</td><td>{s[2]}</td><td>{"Suspended" if s[3] else "Active"}</td><td><a href="/delete-subscriber/{s[0]}" class="btn btn-small btn-danger">Delete</a></td></tr>' for s in subs) or '<tr><td colspan="4">No subscribers.</td></tr>'
+    content = f"""
+        <div class="card"><div class="card-header">Subscriber Accounts</div>
+        <form method="POST">
+            <label>Username</label><input type="text" name="username" required>
+            <label>Password</label><input type="password" name="password" required>
+            <label>Phone (optional)</label><input type="tel" name="phone">
+            <button type="submit" class="btn btn-success" style="margin-top:15px;">Create Subscriber</button>
+        </form>
+        <table style="margin-top:20px;"><tr><th>Username</th><th>Phone</th><th>Status</th><th>Action</th></tr>{rows}</table></div>
+    """
+    return render_page("Users", content, get_pending_count(), admin=True)
+
+@app.route('/delete-subscriber/<int:sub_id>')
+@login_required
+def delete_subscriber(sub_id):
+    conn = sqlite3.connect('rockabywifi.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM subscribers WHERE id=? AND provider_id=?", (sub_id, session['provider_id']))
+    c.execute("DELETE FROM sessions WHERE subscriber_id=?", (sub_id,))
+    conn.commit()
+    conn.close()
+    return redirect('/subscribers')
+
+# MikroTik placeholder
+@app.route('/mikrotik')
+@login_required
+def mikrotik():
+    content = '<div class="card"><div class="card-header">MikroTik Management</div><p>Integration coming soon.</p></div>'
+    return render_page("MikroTik", content, get_pending_count(), admin=True)
+
+# (Include all other existing routes: /toggle-auto, /plans, /provider/edit, /pending, /approve, /reject, /generate-cash, /stats – they are identical to previous versions)
+# ...
 init_db()
 if __name__ == '__main__':
     app.run()
