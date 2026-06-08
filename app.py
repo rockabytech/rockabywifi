@@ -39,9 +39,12 @@ def init_db():
         logo_image TEXT,
         support_phone TEXT
     )''')
+
+    # Safe column migration – only add if missing
     c.execute("PRAGMA table_info(providers)")
+    existing_cols = [col[1] for col in c.fetchall()]
     for col in ['poster_image', 'logo_image', 'support_phone']:
-        if col not in [c[1] for c in c.fetchall()]:
+        if col not in existing_cols:
             c.execute(f"ALTER TABLE providers ADD COLUMN {col} TEXT")
 
     # Plans
@@ -88,7 +91,7 @@ def init_db():
         FOREIGN KEY(provider_id) REFERENCES providers(id)
     )''')
 
-    # Subscriber accounts (long‑term customers)
+    # Subscribers
     c.execute('''CREATE TABLE IF NOT EXISTS subscribers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider_id INTEGER NOT NULL,
@@ -101,7 +104,7 @@ def init_db():
         FOREIGN KEY(provider_id) REFERENCES providers(id)
     )''')
 
-    # Sessions (active subscriber logins)
+    # Sessions
     c.execute('''CREATE TABLE IF NOT EXISTS sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         voucher_id INTEGER,
@@ -115,7 +118,7 @@ def init_db():
         FOREIGN KEY(subscriber_id) REFERENCES subscribers(id)
     )''')
 
-    # Blacklist / restricted
+    # Restricted
     c.execute('''CREATE TABLE IF NOT EXISTS restricted (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider_id INTEGER,
