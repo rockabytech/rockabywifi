@@ -255,7 +255,7 @@ base_template = """
         .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .stat-card { background: var(--card-bg); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); border: 1px solid var(--border); text-align: center; }
         .stat-card h3 { font-size: 2rem; color: var(--primary); }
-        .voucher-code { font-size: 1.5rem; font-weight: 700; letter-spacing: 1px; background: #f0f4f8; padding: 10px 15px; border-radius: 8px; display: inline-block; margin: 10px 0; }
+        .voucher-code { font-size: 1.5rem; font-weight: 700; letter-spacing: 1px; background: #1a73e8; color: #ffffff; padding: 10px 15px; border-radius: 8px; display: inline-block; margin: 10px 0; }
         .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background: #25D366; color: white; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 999; text-decoration: none; }
         .dropdown { position: relative; display: inline-block; }
         .dropdown-content { display: none; position: absolute; background: white; min-width: 200px; box-shadow: 0 8px 16px rgba(0,0,0,0.2); z-index: 1; right:0; }
@@ -756,7 +756,7 @@ def vouchers_bulk():
         codes_html = '<br>'.join(codes)
         content = f"""<div class="card"><div class="alert alert-success">{count} vouchers generated!</div>
         <p><strong>Batch ID:</strong> {batch_id}</p>
-        <div class="voucher-code" style="font-size:1rem; max-height:300px; overflow-y:auto;">{codes_html}</div>
+        <div class="voucher-code" style="font-size:1rem; max-height:300px; overflow-y:auto; color:#ffffff;">{codes_html}</div>
         <a href="/vouchers" class="btn">Back to Vouchers</a></div>"""
         return render_page("Bulk Vouchers", content, get_pending_count(), admin=True)
 
