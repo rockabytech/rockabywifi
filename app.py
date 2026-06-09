@@ -1,5 +1,4 @@
 import os, sqlite3, re, random, string, math
-# RockabyWiFi v2.1
 from datetime import date, timedelta, datetime
 from collections import defaultdict
 from flask import Flask, render_template_string, request, redirect, url_for, session, g
@@ -162,8 +161,8 @@ def seed_sample_data():
         db.execute("INSERT INTO user_activity (provider_id,phone_number,action) VALUES (1,?,?)",(random.choice(phones),random.choice(['login','logout','voucher_purchased'])))
         plan=random.choice(plans); db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used) VALUES (1,?,?,'sms',?,?)",(generate_voucher_code(),plan['id'],random.choice(phones),1 if random.random()>0.3 else 0))
     db.commit()
-    
-    base_template = """
+
+base_template = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
