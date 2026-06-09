@@ -339,7 +339,7 @@ def free_trial():
     db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, ip_address, used) VALUES (1, ?, ?, 'trial', ?, 0)",(code, trial['id'], ip))
     db.execute("INSERT INTO trial_used (ip_address) VALUES (?)",(ip,))
     db.commit()
-    content = f'<div class="card"><div class="alert alert-success">Free trial activated!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{code}</div><button class="copy-btn" onclick="navigator.clipboard.writeText('{code}')">📋 Copy</button>
+    content = f'<div class="card"><div class="alert alert-success">Free trial activated!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{code}</div><button class="copy-btn" onclick="navigator.clipboard.writeText(\'{code}\')">📋 Copy</button><p style="margin-top:10px;">Use this code on the <a href="/redeem">Redeem page</a> to connect for 5 minutes.</p><a href="/" class="btn">Back to Home</a></div>'
     return render_page("Free Trial", content, get_pending_count(), admin=False)
 
 @app.route('/redeem', methods=['GET','POST'])
