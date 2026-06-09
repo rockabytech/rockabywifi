@@ -517,6 +517,7 @@ def api_active_users():
     return {'labels':labels,'values':vals}
 
 @app.route('/api/retention')
+@login_required
 def api_retention():
     today = date.today(); labels = [(today-timedelta(days=30*i)).strftime('%b %Y') for i in range(5,-1,-1)]
     return {'labels':labels,'new_cust':[random.randint(5,20) for _ in range(6)],'returning':[random.randint(10,40) for _ in range(6)],'churned':[random.randint(2,10) for _ in range(6)],'retention':[random.randint(60,95) for _ in range(6)]}
@@ -538,6 +539,7 @@ def api_package_util():
     return {'labels':[r['name'] for r in rows] or ['No sales'],'values':[r['c'] for r in rows] or [1]}
 
 @app.route('/api/forecast')
+@login_required
 def api_forecast():
     today = date.today(); labels = [(today+timedelta(days=i)).strftime('%d %b') for i in range(-30,90)]
     hist = [random.randint(5000,20000) for _ in range(30)]; fc = [None]*30 + [random.randint(12000,25000) for _ in range(90)]
