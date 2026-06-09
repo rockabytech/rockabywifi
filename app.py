@@ -339,7 +339,7 @@ def free_trial():
     db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, ip_address, used) VALUES (1, ?, ?, 'trial', ?, 0)",(code, trial['id'], ip))
     db.execute("INSERT INTO trial_used (ip_address) VALUES (?)",(ip,))
     db.commit()
-    content = f'<div class="card"><div class="alert alert-success">Free trial activated!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{code}</div><button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById(\'vc\').innerText)">📋 Copy</button><p style="margin-top:10px;">Use this code on the <a href="/redeem">Redeem page</a> to connect for 5 minutes.</p><a href="/" class="btn">Back to Home</a></div>'
+    content = f'<div class="card"><div class="alert alert-success">Free trial activated!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{code}</div><button class="copy-btn" onclick="navigator.clipboard.writeText('{code}')">📋 Copy</button>
     return render_page("Free Trial", content, get_pending_count(), admin=False)
 
 @app.route('/redeem', methods=['GET','POST'])
@@ -389,7 +389,7 @@ def sms_verify():
             db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (1,?,?,'sms',?)",(vc,plan_id,phone))
             db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status, voucher_code) VALUES (1,?,?,?,?,?,?,?,'approved',?)",(phone,plan_id,raw,parsed['tid'],parsed['amount'],rf,parsed['date'],vc))
             db.commit()
-            content = f'<div class="card"><div class="alert alert-success">Payment verified!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{vc}</div><button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById(\'vc\').innerText)">📋 Copy</button><p style="margin-top:10px;">Use this code on the <a href="/redeem">Redeem page</a> to connect.</p><a href="/" class="btn">Back to Home</a></div>'
+            content = f'<div class="card"><div class="alert alert-success">Payment verified!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{vc}</div><button class="copy-btn" onclick="navigator.clipboard.writeText(\'{vc}\')">📋 Copy</button><p style="margin-top:10px;">Use this code on the <a href="/redeem">Redeem page</a> to connect.</p><a href="/" class="btn">Back to Home</a></div>'
         else:
             db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status) VALUES (1,?,?,?,?,?,?,?,'pending')",(phone,plan_id,raw,parsed['tid'],parsed['amount'],rf,parsed['date']))
             db.commit()
