@@ -161,6 +161,7 @@ def seed_sample_data():
         db.execute("INSERT INTO user_activity (provider_id,phone_number,action) VALUES (1,?,?)",(random.choice(phones),random.choice(['login','logout','voucher_purchased'])))
         plan=random.choice(plans); db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used) VALUES (1,?,?,'sms',?,?)",(generate_voucher_code(),plan['id'],random.choice(phones),1 if random.random()>0.3 else 0))
     db.commit()
+    
     base_template = """
 <!DOCTYPE html>
 <html lang="en">
@@ -456,7 +457,8 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False):
     else:
         sidebar = ''; topbar = '<div class="topbar" style="background:transparent;box-shadow:none;"></div>'; layout = 'public-layout'
     return base_template.replace('{title}',title).replace('{layout_class}',layout).replace('{sidebar_html}',sidebar).replace('{topbar_html}',topbar).replace('{content}',content).replace('{support_phone}',sp)
-    # ------------------------------------------------------------
+
+# ------------------------------------------------------------
 # ALL ROUTES
 # ------------------------------------------------------------
 @app.route('/')
