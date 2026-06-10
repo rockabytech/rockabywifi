@@ -632,7 +632,7 @@ fetch('/api/package-perf').then(function(r) { return r.json(); }).then(function(
 });
 
 loadPay();
-</script>
+</script>"""
     return render_page("Dashboard", content, get_pending_count(), pid, admin=True)
 
 # API endpoints (unchanged, must be included)
