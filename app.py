@@ -83,7 +83,6 @@ def flutterwave_charge(phone, amount, plan_name, provider):
     except Exception as e:
         print(f"Flutterwave error: {e}")
     return None
-
 # ------------------------------------------------------------
 # DATABASE
 # ------------------------------------------------------------
@@ -1261,7 +1260,6 @@ def edit_mikrotik(rid):
 @login_required
 def delete_mikrotik(rid): db = get_db(); db.execute("DELETE FROM mikrotik_routers WHERE id=? AND provider_id=?",(rid,session['provider_id'])); db.commit(); return redirect('/mikrotik')
 
-# ------------------------------------------------------------
 @app.route('/flutterwave-pay')
 def flutterwave_pay():
     phone = request.args.get('phone','')
@@ -1285,7 +1283,6 @@ def flutterwave_callback():
         return render_page("Payment Status",
             f'<div class="card"><h2>Payment being verified...</h2><p>Ref: {tx_ref}</p></div>',
             get_pending_count(), admin=False)
-    # POST webhook from Flutterwave
     data = request.get_json()
     if data and data.get('status') == 'successful':
         tx_ref = data.get('tx_ref')
@@ -1302,6 +1299,8 @@ def flutterwave_callback():
                 db.commit()
     return 'OK', 200
 
+# ------------------------------------------------------------
+# LEAVE THIS BLANK LINE HERE
 init_db()
 if __name__ == '__main__':
     app.run()
