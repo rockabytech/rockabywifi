@@ -1,4 +1,5 @@
 import os, sqlite3, re, random, string, math
+import requests
 from datetime import date, timedelta, datetime
 from collections import defaultdict
 from flask import Flask, render_template_string, request, redirect, url_for, session, g
@@ -49,6 +50,40 @@ def mt_remove_user(username):
         api.close(); return True
     except: return False
 
+def flutterwave_charge(phone, amount, plan_name, provider):
+    """Initiate a Flutterwave mobile money charge. Returns redirect URL or None."""
+    if not provider['fw_public_key'] or not provider['fw_secret_key']:
+        return None
+    ref = f"ROCK-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(1000,9999)}"
+    payload = {
+        "tx_ref": ref,
+        "amount": str(amount),
+        "currency": "UGX",
+        "payment_type": "mobilemoneygh",
+        "phone_number": clean_number(phone),
+        "email": f"{phone}@rockabywifi.com",
+        "redirect_url": url_for('flutterwave_callback', _external=True),
+        "meta": {"plan_name": plan_name, "phone": phone}
+    }
+    try:
+        resp = requests.post(
+            "https://api.flutterwave.com/v3/charges?type=mobile_money_uganda",
+            json=payload,
+            headers={"Authorization": f"Bearer {provider['fw_secret_key']}"}
+        )
+        data = resp.json()
+        if data.get('status') == 'success':
+            db = get_db()
+            db.execute(
+                "INSERT INTO flutterwave_tx (provider_id, tx_ref, phone, amount, status) VALUES (?,?,?,?,'pending')",
+                (provider['id'], ref, phone, amount)
+            )
+            db.commit()
+            return data['meta']['authorization']['redirect']
+    except Exception as e:
+        print(f"Flutterwave error: {e}")
+    return None
+
 # ------------------------------------------------------------
 # DATABASE
 # ------------------------------------------------------------
@@ -58,11 +93,11 @@ def init_db():
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
-    c.execute('''CREATE TABLE IF NOT EXISTS providers (id INTEGER PRIMARY KEY AUTOINCREMENT, business_name TEXT NOT NULL, contact TEXT, password_hash TEXT NOT NULL, subscription_expiry DATE, percent_fee REAL DEFAULT 5.0, monthly_fee_ugx INTEGER DEFAULT 20000, auto_approve INTEGER DEFAULT 1, is_active INTEGER DEFAULT 1, mtn_number TEXT, airtel_number TEXT, poster_image TEXT, logo_image TEXT, support_phone TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS providers (id INTEGER PRIMARY KEY AUTOINCREMENT, business_name TEXT NOT NULL, contact TEXT, password_hash TEXT NOT NULL, subscription_expiry DATE, percent_fee REAL DEFAULT 5.0, monthly_fee_ugx INTEGER DEFAULT 20000, auto_approve INTEGER DEFAULT 1, is_active INTEGER DEFAULT 1, mtn_number TEXT, airtel_number TEXT, poster_image TEXT, logo_image TEXT, support_phone TEXT, fw_public_key TEXT, fw_secret_key TEXT, fw_encryption_key TEXT, fw_auto_pay INTEGER DEFAULT 0)''')
     c.execute("PRAGMA table_info(providers)")
-    existing = [col[1] for col in c.fetchall()]
-    for col in ['poster_image','logo_image','support_phone']:
-        if col not in existing: c.execute(f"ALTER TABLE providers ADD COLUMN {col} TEXT")
+existing = [col[1] for col in c.fetchall()]
+for col in ['poster_image','logo_image','support_phone','fw_public_key','fw_secret_key','fw_encryption_key','fw_auto_pay']:
+    if col not in existing: c.execute(f"ALTER TABLE providers ADD COLUMN {col} TEXT")
 
     c.execute('''CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, name TEXT NOT NULL, duration_minutes INTEGER NOT NULL, price_ugx INTEGER NOT NULL, is_active INTEGER DEFAULT 1, is_public INTEGER DEFAULT 1, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
     c.execute("PRAGMA table_info(plans)")
@@ -94,6 +129,16 @@ def init_db():
 
     # Free trial tracking
     c.execute('''CREATE TABLE IF NOT EXISTS trial_used (id INTEGER PRIMARY KEY AUTOINCREMENT, ip_address TEXT UNIQUE, used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS flutterwave_tx (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id INTEGER NOT NULL,
+    tx_ref TEXT UNIQUE,
+    phone TEXT,
+    amount INTEGER,
+    status TEXT DEFAULT 'pending',
+    voucher_code TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)''')
 
     # Default provider + plans
     c.execute("SELECT COUNT(*) FROM providers WHERE id=1")
@@ -395,7 +440,28 @@ def sms_verify():
             db.commit()
             content = '<div class="card"><div class="alert alert-success">Payment submitted! Waiting for approval.</div><p><a href="/" class="btn">Back to Home</a></p></div>'
         return render_page("Verification Result", content, get_pending_count())
-    content = f'<div class="card"><div class="card-header">Pay for Internet</div><p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p><p><strong>Pay to:</strong></p><p>MTN: 0785686404 | Airtel: 0751318876</p><p style="color:#666;">Name: Rocky Peter Abayo</p><hr><p>After payment, paste the full SMS below:</p><form method="POST"><input type="hidden" name="phone" value="{phone}"><input type="hidden" name="plan_id" value="{plan_id}"><label>Paste Full MTN/Airtel SMS Here</label><textarea name="raw_sms" rows="6" required></textarea><button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button></form></div>'
+    provider = get_provider(1)
+    auto_pay = provider['fw_auto_pay'] if provider and provider['fw_auto_pay'] else 0
+    auto_btn = ''
+    if auto_pay and provider['fw_public_key']:
+        auto_btn = f'<a href="/flutterwave-pay?phone={phone}&plan_id={plan_id}" class="btn" style="display:block;margin-top:10px;width:100%;background:#28a745;text-align:center;">📱 Pay with Mobile Money (Auto)</a>'
+
+    content = f'''<div class="card"><div class="card-header">Pay for Internet</div>
+    <p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p>
+    <p><strong>Pay to:</strong></p>
+    <p>MTN: 0785686404 | Airtel: 0751318876</p>
+    <p style="color:#666;">Name: Rocky Peter Abayo</p>
+    <hr>
+    {auto_btn}
+    <p style="margin-top:15px;"><strong>Or pay manually:</strong></p>
+    <p>After payment, paste the full SMS below:</p>
+    <form method="POST">
+    <input type="hidden" name="phone" value="{phone}">
+    <input type="hidden" name="plan_id" value="{plan_id}">
+    <label>Paste Full MTN/Airtel SMS Here</label>
+    <textarea name="raw_sms" rows="6" required></textarea>
+    <button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button>
+    </form></div>'''
     return render_page("Verify Payment", content, pc)
 
 @app.route('/subscriber-login', methods=['GET','POST'])
@@ -979,12 +1045,29 @@ def edit_provider():
             os.makedirs(os.path.join(os.getcwd(),'static','uploads'),exist_ok=True); pfn = secure_filename(pf.filename); pf.save(os.path.join(os.getcwd(),'static','uploads',pfn))
         if lf and lf.filename and allowed_file(lf.filename):
             os.makedirs(os.path.join(os.getcwd(),'static','uploads'),exist_ok=True); lfn = secure_filename(lf.filename); lf.save(os.path.join(os.getcwd(),'static','uploads',lfn))
-        db = get_db(); db.execute("UPDATE providers SET business_name=?,support_phone=?,poster_image=?,logo_image=? WHERE id=?",(request.form['business_name'],request.form['support_phone'],pfn,lfn,session['provider_id'])); db.commit()
+        db = get_db(); c.execute("UPDATE providers SET business_name=?,support_phone=?,poster_image=?,logo_image=?,fw_public_key=?,fw_secret_key=?,fw_encryption_key=?,fw_auto_pay=? WHERE id=?",
+          (request.form['business_name'], request.form['support_phone'], pfn, lfn,
+           request.form.get('fw_public_key',''), request.form.get('fw_secret_key',''),
+           request.form.get('fw_encryption_key',''), int(request.form.get('fw_auto_pay',0)),
+           session['provider_id']))
         session['provider_name'] = request.form['business_name']
         return redirect('/dashboard')
     pd = f'<p>Current poster: <img src="/static/uploads/{prov["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if prov and prov['poster_image'] else ''
     ld = f'<p>Current logo: <img src="/static/uploads/{prov["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if prov and prov['logo_image'] else ''
-    content = f'<div class="card"><div class="card-header">Provider Settings</div><form method="POST" enctype="multipart/form-data"><label>Business Name</label><input type="text" name="business_name" value="{prov["business_name"] if prov else ""}" required><label>Support WhatsApp</label><input type="text" name="support_phone" value="{prov["support_phone"] if prov else ""}"><label>Portal Poster/Banner</label><input type="file" name="poster" accept="image/*">{pd}<label>Business Logo</label><input type="file" name="logo" accept="image/*">{ld}<button type="submit" class="btn" style="margin-top:20px;">Save Settings</button></form></div>'
+        content = f'''<div class="card"><div class="card-header">Provider Settings</div><form method="POST" enctype="multipart/form-data">
+    <label>Business Name</label><input type="text" name="business_name" value="{prov["business_name"] if prov else ""}" required>
+    <label>Support WhatsApp</label><input type="text" name="support_phone" value="{prov["support_phone"] if prov else ""}">
+    <label>Flutterwave Public Key</label><input type="text" name="fw_public_key" value="{prov["fw_public_key"] if prov else ''}">
+    <label>Flutterwave Secret Key</label><input type="text" name="fw_secret_key" value="{prov["fw_secret_key"] if prov else ''}">
+    <label>Flutterwave Encryption Key</label><input type="text" name="fw_encryption_key" value="{prov["fw_encryption_key"] if prov else ''}">
+    <label>Enable Auto Payment (Flutterwave)</label>
+    <select name="fw_auto_pay">
+        <option value="1" {"selected" if prov and prov["fw_auto_pay"] else ""}>Yes</option>
+        <option value="0" {"selected" if not prov or not prov["fw_auto_pay"] else ""}>No</option>
+    </select>
+    <label>Portal Poster/Banner</label><input type="file" name="poster" accept="image/*">{pd}
+    <label>Business Logo</label><input type="file" name="logo" accept="image/*">{ld}
+    <button type="submit" class="btn" style="margin-top:20px;">Save Settings</button></form></div>'''
     return render_page("Settings", content, get_pending_count(), admin=True)
 
 # TICKETS, LEADS, EXPENSES, MESSAGES, EMAIL, CAMPAIGN, EQUIPMENT, MIKROTIK (all included without any cut)
@@ -1149,6 +1232,46 @@ def edit_mikrotik(rid):
 def delete_mikrotik(rid): db = get_db(); db.execute("DELETE FROM mikrotik_routers WHERE id=? AND provider_id=?",(rid,session['provider_id'])); db.commit(); return redirect('/mikrotik')
 
 # ------------------------------------------------------------
+@app.route('/flutterwave-pay')
+def flutterwave_pay():
+    phone = request.args.get('phone','')
+    plan_id = request.args.get('plan_id','1')
+    db = get_db()
+    plan = db.execute("SELECT * FROM plans WHERE id=?",(plan_id,)).fetchone()
+    if not plan: return "Invalid plan.", 400
+    provider = get_provider(1)
+    redirect_url = flutterwave_charge(phone, plan['price_ugx'], plan['name'], provider)
+    if redirect_url:
+        return redirect(redirect_url)
+    else:
+        return render_page("Payment Error",
+            f'<div class="card"><div class="alert alert-error">Automatic payment is unavailable. Please use manual payment.</div><p><a href="/sms-verify?phone={phone}&plan_id={plan_id}" class="btn">Manual Payment</a></p></div>',
+            get_pending_count(), admin=False)
+
+@app.route('/flutterwave-callback', methods=['GET','POST'])
+def flutterwave_callback():
+    if request.method == 'GET':
+        tx_ref = request.args.get('tx_ref','')
+        return render_page("Payment Status",
+            f'<div class="card"><h2>Payment being verified...</h2><p>Ref: {tx_ref}</p></div>',
+            get_pending_count(), admin=False)
+    # POST webhook from Flutterwave
+    data = request.get_json()
+    if data and data.get('status') == 'successful':
+        tx_ref = data.get('tx_ref')
+        db = get_db()
+        tx = db.execute("SELECT * FROM flutterwave_tx WHERE tx_ref=? AND status='pending'",(tx_ref,)).fetchone()
+        if tx:
+            plan = db.execute("SELECT id, duration_minutes FROM plans WHERE provider_id=? AND price_ugx=? AND is_active=1 LIMIT 1",
+                              (tx['provider_id'], tx['amount'])).fetchone()
+            if plan:
+                code = generate_voucher_code()
+                db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (?,?,?,'flutterwave',?)",
+                           (tx['provider_id'], code, plan['id'], tx['phone']))
+                db.execute("UPDATE flutterwave_tx SET status='completed', voucher_code=? WHERE tx_ref=?",(code, tx_ref))
+                db.commit()
+    return 'OK', 200
+
 init_db()
 if __name__ == '__main__':
     app.run()
