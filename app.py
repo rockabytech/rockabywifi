@@ -1052,8 +1052,8 @@ def edit_provider():
            session['provider_id']))
         session['provider_name'] = request.form['business_name']
         return redirect('/dashboard')
-    pd = f'<p>Current poster: <img src="/static/uploads/{prov["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if prov and prov['poster_image'] else ''
-        ld = f'<p>Current logo: <img src="/static/uploads/{prov["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if prov and prov['logo_image'] else ''
+        pd = f'<p>Current poster: <img src="/static/uploads/{prov["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if prov and prov['poster_image'] else ''
+    ld = f'<p>Current logo: <img src="/static/uploads/{prov["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if prov and prov['logo_image'] else ''
     content = f'''<div class="card"><div class="card-header">Provider Settings</div><form method="POST" enctype="multipart/form-data">
 <label>Business Name</label><input type="text" name="business_name" value="{prov["business_name"] if prov else ""}" required>
 <label>Support WhatsApp</label><input type="text" name="support_phone" value="{prov["support_phone"] if prov else ""}">
