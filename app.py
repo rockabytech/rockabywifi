@@ -444,13 +444,35 @@ def logout(): session.clear(); return redirect('/')
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    pid = session['provider_id']; db = get_db(); seed_sample_data()
-    today = date.today(); ms = today.replace(day=1).isoformat()
+    pid = session['provider_id']
+    db = get_db()
+    seed_sample_data()
+    today = date.today()
+    ms = today.replace(day=1).isoformat()
     rev = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ?",(pid,ms)).fetchone()['t']
     sub = db.execute("SELECT COUNT(*) as c FROM subscribers WHERE provider_id=? AND suspended=0",(pid,)).fetchone()['c']
     tc = db.execute("SELECT COUNT(DISTINCT phone_number) as c FROM vouchers WHERE provider_id=?",(pid,)).fetchone()['c']
-    content = f"""<div class="stat-grid"><div class="stat-card"><h3>UGX {rev or 0:,}</h3><small>Amount This Month</small></div><div class="stat-card"><h3>{sub}</h3><small>Subscribed Clients</small></div><div class="stat-card"><h3>{tc}</h3><small>Total Clients Ever</small></div></div>
-    <div class="card"><div class="card-header">📊 Payments <select id="pp" onchange="loadPay()" style="width:auto;display:inline;"><option value="today">Today</option><option value="this_week">This Week</option><option value="last_week">Last Week</option><option value="this_month">This Month</option><option value="last_month">Last Month</option><option value="this_year">This Year</option><option value="last_year">Last Year</option></select></div><div class="chart-container"><canvas id="payChart"></canvas></div></div>
+
+    content = """
+    <div class="stat-grid">
+        <div class="stat-card"><h3>UGX """ + f"{rev or 0:,}" + """</h3><small>Amount This Month</small></div>
+        <div class="stat-card"><h3>""" + str(sub) + """</h3><small>Subscribed Clients</small></div>
+        <div class="stat-card"><h3>""" + str(tc) + """</h3><small>Total Clients Ever</small></div>
+    </div>
+    <div class="card">
+        <div class="card-header">📊 Payments 
+            <select id="pp" onchange="loadPay()" style="width:auto;display:inline;">
+                <option value="today">Today</option>
+                <option value="this_week">This Week</option>
+                <option value="last_week">Last Week</option>
+                <option value="this_month">This Month</option>
+                <option value="last_month">Last Month</option>
+                <option value="this_year">This Year</option>
+                <option value="last_year">Last Year</option>
+            </select>
+        </div>
+        <div class="chart-container"><canvas id="payChart"></canvas></div>
+    </div>
     <div class="card"><div class="card-header">👥 Active Users</div><div class="chart-container"><canvas id="auChart"></canvas></div></div>
     <div class="card"><div class="card-header">📈 Retention</div><div class="chart-container"><canvas id="retChart"></canvas></div></div>
     <div class="card"><div class="card-header">📅 Data Usage</div><div class="chart-container"><canvas id="duChart"></canvas></div></div>
@@ -462,177 +484,158 @@ def dashboard():
     <div class="card"><div class="card-header">⭐ Most Active</div><table id="maTable"><tr><th>Username</th><th>Phone</th><th>Data</th></tr></table></div>
     <div class="card"><div class="card-header">🏆 Package Perf</div><div class="chart-container"><canvas id="ppChart"></canvas></div></div>
     <script>
-async function loadPay() {
-    var p = document.getElementById('pp').value;
-    var r = await fetch('/api/payments?period=' + p);
-    var d = await r.json();
-    var ctx = document.getElementById('payChart').getContext('2d');
-    if (window.pc) window.pc.destroy();
-    window.pc = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: d.labels,
-            datasets: [{
-                label: 'Payments (UGX)',
-                data: d.values,
-                backgroundColor: '#1a73e8'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false
-        }
+    async function loadPay() {
+        var p = document.getElementById('pp').value;
+        var r = await fetch('/api/payments?period=' + p);
+        var d = await r.json();
+        var ctx = document.getElementById('payChart').getContext('2d');
+        if (window.pc) window.pc.destroy();
+        window.pc = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: d.labels,
+                datasets: [{
+                    label: 'Payments (UGX)',
+                    data: d.values,
+                    backgroundColor: '#1a73e8'
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    }
+    fetch('/api/active-users-chart').then(function(r) { return r.json(); }).then(function(d) {
+        new Chart(document.getElementById('auChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: d.labels,
+                datasets: [{ label: 'Active', data: d.values, borderColor: '#28a745', fill: false }]
+            }
+        });
     });
-}
-
-fetch('/api/active-users-chart').then(function(r) { return r.json(); }).then(function(d) {
-    new Chart(document.getElementById('auChart').getContext('2d'), {
-        type: 'line',
-        data: {
-            labels: d.labels,
-            datasets: [{
-                label: 'Active',
-                data: d.values,
-                borderColor: '#28a745',
-                fill: false
-            }]
-        }
+    fetch('/api/retention').then(function(r) { return r.json(); }).then(function(d) {
+        new Chart(document.getElementById('retChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: d.labels,
+                datasets: [
+                    { label: 'New', data: d.new_cust, backgroundColor: '#1a73e8' },
+                    { label: 'Returning', data: d.returning, backgroundColor: '#28a745' },
+                    { label: 'Churned', data: d.churned, backgroundColor: '#dc3545' }
+                ]
+            }
+        });
     });
-});
-
-fetch('/api/retention').then(function(r) { return r.json(); }).then(function(d) {
-    new Chart(document.getElementById('retChart').getContext('2d'), {
-        type: 'bar',
-        data: {
-            labels: d.labels,
-            datasets: [
-                { label: 'New', data: d.new_cust, backgroundColor: '#1a73e8' },
-                { label: 'Returning', data: d.returning, backgroundColor: '#28a745' },
-                { label: 'Churned', data: d.churned, backgroundColor: '#dc3545' }
-            ]
-        }
-    });
-});
-
-fetch('/api/data-usage').then(function(r) { return r.json(); }).then(function(d) {
-    new Chart(document.getElementById('duChart').getContext('2d'), {
-        type: 'line',
-        data: {
-            labels: d.labels,
-            datasets: [
-                { label: 'DL', data: d.downloads, borderColor: '#1a73e8', fill: false },
-                { label: 'UL', data: d.uploads, borderColor: '#ffc107', fill: false }
-            ]
-        },
-        options: {
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(c) {
-                            return c.dataset.label + ': ' + (c.raw >= 1000 ? (c.raw/1000).toFixed(2) + ' GB' : c.raw.toFixed(2) + ' MB');
+    fetch('/api/data-usage').then(function(r) { return r.json(); }).then(function(d) {
+        new Chart(document.getElementById('duChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: d.labels,
+                datasets: [
+                    { label: 'DL', data: d.downloads, borderColor: '#1a73e8', fill: false },
+                    { label: 'UL', data: d.uploads, borderColor: '#ffc107', fill: false }
+                ]
+            },
+            options: {
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(c) {
+                                return c.dataset.label + ': ' + (c.raw >= 1000 ? (c.raw/1000).toFixed(2) + ' GB' : c.raw.toFixed(2) + ' MB');
+                            }
                         }
                     }
                 }
             }
-        }
+        });
     });
-});
-
-fetch('/api/package-util').then(function(r) { return r.json(); }).then(function(d) {
-    new Chart(document.getElementById('pkgChart').getContext('2d'), {
-        type: 'doughnut',
-        data: {
-            labels: d.labels,
-            datasets: [{
-                data: d.values,
-                backgroundColor: ['#1a73e8','#28a745','#ffc107','#dc3545','#6f42c1','#fd7e14']
-            }]
-        }
+    fetch('/api/package-util').then(function(r) { return r.json(); }).then(function(d) {
+        new Chart(document.getElementById('pkgChart').getContext('2d'), {
+            type: 'doughnut',
+            data: {
+                labels: d.labels,
+                datasets: [{
+                    data: d.values,
+                    backgroundColor: ['#1a73e8','#28a745','#ffc107','#dc3545','#6f42c1','#fd7e14']
+                }]
+            }
+        });
     });
-});
-
-fetch('/api/forecast').then(function(r) { return r.json(); }).then(function(d) {
-    new Chart(document.getElementById('fcChart').getContext('2d'), {
-        type: 'line',
-        data: {
-            labels: d.labels,
-            datasets: [
-                { label: 'Hist', data: d.historical, borderColor: '#1a73e8', fill: false },
-                { label: 'Fcst', data: d.forecast, borderColor: '#28a745', borderDash: [5,5], fill: false },
-                { label: 'Upper', data: d.upper, borderColor: '#dc3545', borderDash: [2,2], fill: false, pointRadius: 0 },
-                { label: 'Lower', data: d.lower, borderColor: '#dc3545', borderDash: [2,2], fill: false, pointRadius: 0 }
-            ]
-        }
+    fetch('/api/forecast').then(function(r) { return r.json(); }).then(function(d) {
+        new Chart(document.getElementById('fcChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: d.labels,
+                datasets: [
+                    { label: 'Hist', data: d.historical, borderColor: '#1a73e8', fill: false },
+                    { label: 'Fcst', data: d.forecast, borderColor: '#28a745', borderDash: [5,5], fill: false },
+                    { label: 'Upper', data: d.upper, borderColor: '#dc3545', borderDash: [2,2], fill: false, pointRadius: 0 },
+                    { label: 'Lower', data: d.lower, borderColor: '#dc3545', borderDash: [2,2], fill: false, pointRadius: 0 }
+                ]
+            }
+        });
     });
-});
-
-fetch('/api/sms-stats').then(function(r) { return r.json(); }).then(function(d) {
-    new Chart(document.getElementById('smsChart').getContext('2d'), {
-        type: 'bar',
-        data: {
-            labels: d.labels,
-            datasets: [{ label: 'SMS', data: d.values, backgroundColor: '#6f42c1' }]
-        }
+    fetch('/api/sms-stats').then(function(r) { return r.json(); }).then(function(d) {
+        new Chart(document.getElementById('smsChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: d.labels,
+                datasets: [{ label: 'SMS', data: d.values, backgroundColor: '#6f42c1' }]
+            }
+        });
     });
-});
-
-fetch('/api/network').then(function(r) { return r.json(); }).then(function(d) {
-    new Chart(document.getElementById('netChart').getContext('2d'), {
-        type: 'bar',
-        data: {
-            labels: d.labels,
-            datasets: [
-                { label: 'DL', data: d.downloads, backgroundColor: '#1a73e8' },
-                { label: 'UL', data: d.uploads, backgroundColor: '#ffc107' }
-            ]
-        },
-        options: {
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(c) {
-                            return c.dataset.label + ': ' + (c.raw >= 1000 ? (c.raw/1000).toFixed(2) + ' GB' : c.raw.toFixed(2) + ' MB');
+    fetch('/api/network').then(function(r) { return r.json(); }).then(function(d) {
+        new Chart(document.getElementById('netChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: d.labels,
+                datasets: [
+                    { label: 'DL', data: d.downloads, backgroundColor: '#1a73e8' },
+                    { label: 'UL', data: d.uploads, backgroundColor: '#ffc107' }
+                ]
+            },
+            options: {
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(c) {
+                                return c.dataset.label + ': ' + (c.raw >= 1000 ? (c.raw/1000).toFixed(2) + ' GB' : c.raw.toFixed(2) + ' MB');
+                            }
                         }
                     }
                 }
             }
-        }
+        });
     });
-});
-
-fetch('/api/registration').then(function(r) { return r.json(); }).then(function(d) {
-    new Chart(document.getElementById('regChart').getContext('2d'), {
-        type: 'line',
-        data: {
-            labels: d.labels,
-            datasets: [{ label: 'Regs', data: d.values, borderColor: '#fd7e14', fill: false }]
-        }
+    fetch('/api/registration').then(function(r) { return r.json(); }).then(function(d) {
+        new Chart(document.getElementById('regChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: d.labels,
+                datasets: [{ label: 'Regs', data: d.values, borderColor: '#fd7e14', fill: false }]
+            }
+        });
     });
-});
-
-fetch('/api/most-active').then(function(r) { return r.json(); }).then(function(d) {
-    var rows = '';
-    d.forEach(function(u) {
-        rows += '<tr><td>' + u.username + '</td><td>' + u.phone + '</td><td>' + u.data_usage + '</td></tr>';
+    fetch('/api/most-active').then(function(r) { return r.json(); }).then(function(d) {
+        var rows = '';
+        d.forEach(function(u) {
+            rows += '<tr><td>' + u.username + '</td><td>' + u.phone + '</td><td>' + u.data_usage + '</td></tr>';
+        });
+        document.getElementById('maTable').innerHTML += rows;
     });
-    document.getElementById('maTable').innerHTML += rows;
-});
-
-fetch('/api/package-perf').then(function(r) { return r.json(); }).then(function(d) {
-    new Chart(document.getElementById('ppChart').getContext('2d'), {
-        type: 'radar',
-        data: {
-            labels: d.labels,
-            datasets: [
-                { label: 'Sales', data: d.sales, borderColor: '#1a73e8', backgroundColor: 'rgba(26,115,232,0.2)' },
-                { label: 'Revenue', data: d.revenue, borderColor: '#28a745', backgroundColor: 'rgba(40,167,69,0.2)' }
-            ]
-        }
+    fetch('/api/package-perf').then(function(r) { return r.json(); }).then(function(d) {
+        new Chart(document.getElementById('ppChart').getContext('2d'), {
+            type: 'radar',
+            data: {
+                labels: d.labels,
+                datasets: [
+                    { label: 'Sales', data: d.sales, borderColor: '#1a73e8', backgroundColor: 'rgba(26,115,232,0.2)' },
+                    { label: 'Revenue', data: d.revenue, borderColor: '#28a745', backgroundColor: 'rgba(40,167,69,0.2)' }
+                ]
+            }
+        });
     });
-});
-
-loadPay();
-</script>"""
+    loadPay();
+    </script>"""
     return render_page("Dashboard", content, get_pending_count(), pid, admin=True)
 
 # API endpoints (unchanged, must be included)
