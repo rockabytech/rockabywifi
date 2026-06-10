@@ -94,10 +94,11 @@ def init_db():
     c = conn.cursor()
 
     c.execute('''CREATE TABLE IF NOT EXISTS providers (id INTEGER PRIMARY KEY AUTOINCREMENT, business_name TEXT NOT NULL, contact TEXT, password_hash TEXT NOT NULL, subscription_expiry DATE, percent_fee REAL DEFAULT 5.0, monthly_fee_ugx INTEGER DEFAULT 20000, auto_approve INTEGER DEFAULT 1, is_active INTEGER DEFAULT 1, mtn_number TEXT, airtel_number TEXT, poster_image TEXT, logo_image TEXT, support_phone TEXT, fw_public_key TEXT, fw_secret_key TEXT, fw_encryption_key TEXT, fw_auto_pay INTEGER DEFAULT 0)''')
+    
     c.execute("PRAGMA table_info(providers)")
-existing = [col[1] for col in c.fetchall()]
-for col in ['poster_image','logo_image','support_phone','fw_public_key','fw_secret_key','fw_encryption_key','fw_auto_pay']:
-    if col not in existing: c.execute(f"ALTER TABLE providers ADD COLUMN {col} TEXT")
+    existing = [col[1] for col in c.fetchall()]
+    for col in ['poster_image','logo_image','support_phone','fw_public_key','fw_secret_key','fw_encryption_key','fw_auto_pay']:
+        if col not in existing: c.execute(f"ALTER TABLE providers ADD COLUMN {col} TEXT")
 
     c.execute('''CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, name TEXT NOT NULL, duration_minutes INTEGER NOT NULL, price_ugx INTEGER NOT NULL, is_active INTEGER DEFAULT 1, is_public INTEGER DEFAULT 1, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
     c.execute("PRAGMA table_info(plans)")
@@ -106,6 +107,7 @@ for col in ['poster_image','logo_image','support_phone','fw_public_key','fw_secr
         c.execute("ALTER TABLE plans ADD COLUMN is_public INTEGER DEFAULT 1")
 
     c.execute('''CREATE TABLE IF NOT EXISTS voucher_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, phone_number TEXT NOT NULL, plan_id INTEGER, raw_sms TEXT NOT NULL, transaction_id TEXT, amount INTEGER, recipient TEXT, payment_date TEXT, status TEXT DEFAULT 'pending', voucher_code TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS vouchers (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, code TEXT UNIQUE NOT NULL, plan_id INTEGER, payment_method TEXT DEFAULT 'sms', phone_number TEXT, used INTEGER DEFAULT 0, used_at TIMESTAMP, mac_address TEXT, ip_address TEXT, batch_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
     c.execute("PRAGMA table_info(vouchers)")
     vouch_cols = [col[1] for col in c.fetchall()]
@@ -113,32 +115,45 @@ for col in ['poster_image','logo_image','support_phone','fw_public_key','fw_secr
         c.execute("ALTER TABLE vouchers ADD COLUMN batch_id TEXT")
 
     c.execute('''CREATE TABLE IF NOT EXISTS subscribers (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, phone TEXT, current_ip TEXT, suspended INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, voucher_id INTEGER, subscriber_id INTEGER, provider_id INTEGER, mac_address TEXT, ip_address TEXT, started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, ended_at TIMESTAMP, data_download REAL DEFAULT 0, data_upload REAL DEFAULT 0, FOREIGN KEY(voucher_id) REFERENCES vouchers(id), FOREIGN KEY(subscriber_id) REFERENCES subscribers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS restricted (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER, phone_number TEXT, mac_address TEXT, reason TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, key TEXT NOT NULL, value TEXT, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS data_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, phone_number TEXT, session_date DATE, data_download REAL DEFAULT 0, data_upload REAL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS sms_log (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, phone_number TEXT, message TEXT, sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS user_activity (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, phone_number TEXT, action TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, subject TEXT NOT NULL, description TEXT, status TEXT DEFAULT 'open', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS leads (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, name TEXT NOT NULL, phone TEXT, email TEXT, source TEXT, notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, description TEXT NOT NULL, amount REAL NOT NULL, category TEXT, expense_date DATE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT NOT NULL, message TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS campaigns (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, start_date DATE, end_date DATE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS equipment (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, name TEXT NOT NULL, model TEXT, serial_number TEXT, status TEXT DEFAULT 'active', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS mikrotik_routers (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, name TEXT NOT NULL, ip_address TEXT, username TEXT, password TEXT, api_port INTEGER DEFAULT 8728, is_active INTEGER DEFAULT 1, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
 
-    # Free trial tracking
     c.execute('''CREATE TABLE IF NOT EXISTS trial_used (id INTEGER PRIMARY KEY AUTOINCREMENT, ip_address TEXT UNIQUE, used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+
     c.execute('''CREATE TABLE IF NOT EXISTS flutterwave_tx (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    provider_id INTEGER NOT NULL,
-    tx_ref TEXT UNIQUE,
-    phone TEXT,
-    amount INTEGER,
-    status TEXT DEFAULT 'pending',
-    voucher_code TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)''')
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider_id INTEGER NOT NULL,
+        tx_ref TEXT UNIQUE,
+        phone TEXT,
+        amount INTEGER,
+        status TEXT DEFAULT 'pending',
+        voucher_code TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
 
     # Default provider + plans
     c.execute("SELECT COUNT(*) FROM providers WHERE id=1")
@@ -157,6 +172,7 @@ for col in ['poster_image','logo_image','support_phone','fw_public_key','fw_secr
         c.execute("SELECT COUNT(*) FROM plans WHERE provider_id=1 AND name='Free Trial'")
         if c.fetchone()[0] == 0:
             c.execute("INSERT INTO plans (provider_id, name, duration_minutes, price_ugx, is_public) VALUES (1,'Free Trial',5,0,0)")
+    
     conn.commit()
     conn.close()
 
