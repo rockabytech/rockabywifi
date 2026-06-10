@@ -1033,26 +1033,40 @@ def stats():
     <div class="platform-revenue"><strong>RockabyTech Platform Fee (5% this week):</strong> UGX {wf:,} &nbsp; <small>({ws.strftime('%d %b')} - {we.strftime('%d %b')})</small></div>
     <div class="card"><div class="card-header">Top Selling Plans</div><table><tr><th>Plan</th><th>Sold</th></tr>{''.join(f'<tr><td>{p["name"]}</td><td>{p["c"]}</td></tr>' for p in pstats) or '<tr><td colspan="2">No sales yet.</td></tr>'}</table></div><a href="/dashboard" class="btn btn-outline">Back to Dashboard</a>"""
     return render_page("Statistics", content, get_pending_count(), admin=True)
-
+    
 @app.route('/provider/edit', methods=['GET','POST'])
 @login_required
 def edit_provider():
     prov = get_provider(session['provider_id'])
     if request.method == 'POST':
-        pf = request.files.get('poster'); lf = request.files.get('logo')
-        pfn = prov['poster_image'] if prov else None; lfn = prov['logo_image'] if prov else None
+        pf = request.files.get('poster')
+        lf = request.files.get('logo')
+        pfn = prov['poster_image'] if prov else None
+        lfn = prov['logo_image'] if prov else None
         if pf and pf.filename and allowed_file(pf.filename):
-            os.makedirs(os.path.join(os.getcwd(),'static','uploads'),exist_ok=True); pfn = secure_filename(pf.filename); pf.save(os.path.join(os.getcwd(),'static','uploads',pfn))
+            os.makedirs(os.path.join(os.getcwd(),'static','uploads'),exist_ok=True)
+            pfn = secure_filename(pf.filename)
+            pf.save(os.path.join(os.getcwd(),'static','uploads',pfn))
         if lf and lf.filename and allowed_file(lf.filename):
-            os.makedirs(os.path.join(os.getcwd(),'static','uploads'),exist_ok=True); lfn = secure_filename(lf.filename); lf.save(os.path.join(os.getcwd(),'static','uploads',lfn))
-        db = get_db(); c.execute("UPDATE providers SET business_name=?,support_phone=?,poster_image=?,logo_image=?,fw_public_key=?,fw_secret_key=?,fw_encryption_key=?,fw_auto_pay=? WHERE id=?",
-          (request.form['business_name'], request.form['support_phone'], pfn, lfn,
-           request.form.get('fw_public_key',''), request.form.get('fw_secret_key',''),
-           request.form.get('fw_encryption_key',''), int(request.form.get('fw_auto_pay',0)),
-           session['provider_id']))
+            os.makedirs(os.path.join(os.getcwd(),'static','uploads'),exist_ok=True)
+            lfn = secure_filename(lf.filename)
+            lf.save(os.path.join(os.getcwd(),'static','uploads',lfn))
+        db = get_db()
+        db.execute("UPDATE providers SET business_name=?,support_phone=?,poster_image=?,logo_image=?,fw_public_key=?,fw_secret_key=?,fw_encryption_key=?,fw_auto_pay=? WHERE id=?",
+                   (request.form['business_name'],
+                    request.form['support_phone'],
+                    pfn,
+                    lfn,
+                    request.form.get('fw_public_key',''),
+                    request.form.get('fw_secret_key',''),
+                    request.form.get('fw_encryption_key',''),
+                    int(request.form.get('fw_auto_pay',0)),
+                    session['provider_id']))
+        db.commit()
         session['provider_name'] = request.form['business_name']
         return redirect('/dashboard')
-        pd = f'<p>Current poster: <img src="/static/uploads/{prov["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if prov and prov['poster_image'] else ''
+
+    pd = f'<p>Current poster: <img src="/static/uploads/{prov["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if prov and prov['poster_image'] else ''
     ld = f'<p>Current logo: <img src="/static/uploads/{prov["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if prov and prov['logo_image'] else ''
     content = f'''<div class="card"><div class="card-header">Provider Settings</div><form method="POST" enctype="multipart/form-data">
 <label>Business Name</label><input type="text" name="business_name" value="{prov["business_name"] if prov else ""}" required>
