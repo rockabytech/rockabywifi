@@ -1053,21 +1053,21 @@ def edit_provider():
         session['provider_name'] = request.form['business_name']
         return redirect('/dashboard')
     pd = f'<p>Current poster: <img src="/static/uploads/{prov["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if prov and prov['poster_image'] else ''
-    ld = f'<p>Current logo: <img src="/static/uploads/{prov["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if prov and prov['logo_image'] else ''
-        content = f'''<div class="card"><div class="card-header">Provider Settings</div><form method="POST" enctype="multipart/form-data">
-    <label>Business Name</label><input type="text" name="business_name" value="{prov["business_name"] if prov else ""}" required>
-    <label>Support WhatsApp</label><input type="text" name="support_phone" value="{prov["support_phone"] if prov else ""}">
-    <label>Flutterwave Public Key</label><input type="text" name="fw_public_key" value="{prov["fw_public_key"] if prov else ''}">
-    <label>Flutterwave Secret Key</label><input type="text" name="fw_secret_key" value="{prov["fw_secret_key"] if prov else ''}">
-    <label>Flutterwave Encryption Key</label><input type="text" name="fw_encryption_key" value="{prov["fw_encryption_key"] if prov else ''}">
-    <label>Enable Auto Payment (Flutterwave)</label>
-    <select name="fw_auto_pay">
-        <option value="1" {"selected" if prov and prov["fw_auto_pay"] else ""}>Yes</option>
-        <option value="0" {"selected" if not prov or not prov["fw_auto_pay"] else ""}>No</option>
-    </select>
-    <label>Portal Poster/Banner</label><input type="file" name="poster" accept="image/*">{pd}
-    <label>Business Logo</label><input type="file" name="logo" accept="image/*">{ld}
-    <button type="submit" class="btn" style="margin-top:20px;">Save Settings</button></form></div>'''
+        ld = f'<p>Current logo: <img src="/static/uploads/{prov["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if prov and prov['logo_image'] else ''
+    content = f'''<div class="card"><div class="card-header">Provider Settings</div><form method="POST" enctype="multipart/form-data">
+<label>Business Name</label><input type="text" name="business_name" value="{prov["business_name"] if prov else ""}" required>
+<label>Support WhatsApp</label><input type="text" name="support_phone" value="{prov["support_phone"] if prov else ""}">
+<label>Flutterwave Public Key</label><input type="text" name="fw_public_key" value="{prov["fw_public_key"] if prov else ''}">
+<label>Flutterwave Secret Key</label><input type="text" name="fw_secret_key" value="{prov["fw_secret_key"] if prov else ''}">
+<label>Flutterwave Encryption Key</label><input type="text" name="fw_encryption_key" value="{prov["fw_encryption_key"] if prov else ''}">
+<label>Enable Auto Payment (Flutterwave)</label>
+<select name="fw_auto_pay">
+    <option value="1" {"selected" if prov and prov["fw_auto_pay"] else ""}>Yes</option>
+    <option value="0" {"selected" if not prov or not prov["fw_auto_pay"] else ""}>No</option>
+</select>
+<label>Portal Poster/Banner</label><input type="file" name="poster" accept="image/*">{pd}
+<label>Business Logo</label><input type="file" name="logo" accept="image/*">{ld}
+<button type="submit" class="btn" style="margin-top:20px;">Save Settings</button></form></div>'''
     return render_page("Settings", content, get_pending_count(), admin=True)
 
 # TICKETS, LEADS, EXPENSES, MESSAGES, EMAIL, CAMPAIGN, EQUIPMENT, MIKROTIK (all included without any cut)
