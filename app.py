@@ -672,10 +672,24 @@ def api_payments():
 @app.route('/api/active-users-chart')
 @login_required
 def api_active_users():
-    db = get_db(); today = date.today()
-    labels = [(today-timedelta(days=i)).strftime('%a') for i in range(6,-1,-1)]
-    vals = [db.execute("SELECT COUNT(*) as c FROM sessions WHERE provider_id=? AND date(started_at)=?",(session['provider_id'],(today-timedelta(days=i)).isoformat())).fetchone()['c'] for i in range(6,-1,-1)]
-    return {'labels':labels,'values':vals}
+    db = get_db()
+    today = date.today()
+    labels = [(today - timedelta(days=i)).strftime('%a') for i in range(6, -1, -1)]
+    vals = []
+    for i in range(6, -1, -1):
+        d = today - timedelta(days=i)
+        # Vouchers redeemed on this day
+        v_cnt = db.execute(
+            "SELECT COUNT(*) as c FROM vouchers WHERE provider_id=? AND used=1 AND date(used_at)=?",
+            (session['provider_id'], d.isoformat())
+        ).fetchone()['c']
+        # Subscriber sessions started on this day
+        s_cnt = db.execute(
+            "SELECT COUNT(*) as c FROM sessions WHERE provider_id=? AND date(started_at)=?",
+            (session['provider_id'], d.isoformat())
+        ).fetchone()['c']
+        vals.append(v_cnt + s_cnt)
+    return {'labels': labels, 'values': vals}
 
 @app.route('/api/retention')
 @login_required
