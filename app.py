@@ -22,6 +22,7 @@ UPLOAD_FOLDER = os.path.join(os.getcwd(), 'static', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+# MikroTik settings
 MIKROTIK_HOST = '192.168.1.1'
 MIKROTIK_USER = 'admin'
 MIKROTIK_PASS = 'your_password'
@@ -48,26 +49,34 @@ def mt_remove_user(username):
         api.close(); return True
     except: return False
 
+# ------------------------------------------------------------
+# DATABASE
+# ------------------------------------------------------------
 def init_db():
     conn = sqlite3.connect('rockabywifi.db')
     conn.execute("PRAGMA busy_timeout = 5000;")
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
+
     c.execute('''CREATE TABLE IF NOT EXISTS providers (id INTEGER PRIMARY KEY AUTOINCREMENT, business_name TEXT NOT NULL, contact TEXT, password_hash TEXT NOT NULL, subscription_expiry DATE, percent_fee REAL DEFAULT 5.0, monthly_fee_ugx INTEGER DEFAULT 20000, auto_approve INTEGER DEFAULT 1, is_active INTEGER DEFAULT 1, mtn_number TEXT, airtel_number TEXT, poster_image TEXT, logo_image TEXT, support_phone TEXT, yo_username TEXT, yo_password TEXT, yo_auto_pay INTEGER DEFAULT 0)''')
     c.execute("PRAGMA table_info(providers)")
     existing = [col[1] for col in c.fetchall()]
     for col in ['poster_image','logo_image','support_phone','yo_username','yo_password','yo_auto_pay']:
         if col not in existing: c.execute(f"ALTER TABLE providers ADD COLUMN {col} TEXT")
+
     c.execute('''CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, name TEXT NOT NULL, duration_minutes INTEGER NOT NULL, price_ugx INTEGER NOT NULL, is_active INTEGER DEFAULT 1, is_public INTEGER DEFAULT 1, speed_down TEXT, speed_up TEXT, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
     c.execute("PRAGMA table_info(plans)")
     plan_cols = [col[1] for col in c.fetchall()]
     for col in ['is_public','speed_down','speed_up']:
         if col not in plan_cols: c.execute(f"ALTER TABLE plans ADD COLUMN {col} TEXT")
+
     c.execute('''CREATE TABLE IF NOT EXISTS voucher_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, phone_number TEXT NOT NULL, plan_id INTEGER, raw_sms TEXT NOT NULL, transaction_id TEXT, amount INTEGER, recipient TEXT, payment_date TEXT, status TEXT DEFAULT 'pending', voucher_code TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS vouchers (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, code TEXT UNIQUE NOT NULL, plan_id INTEGER, payment_method TEXT DEFAULT 'sms', phone_number TEXT, used INTEGER DEFAULT 0, used_at TIMESTAMP, mac_address TEXT, ip_address TEXT, batch_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS vouchers (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, code TEXT UNIQUE NOT NULL, plan_id INTEGER, payment_method TEXT DEFAULT 'sms', phone_number TEXT, used INTEGER DEFAULT 0, used_at TIMESTAMP, mac_address TEXT, ip_address TEXT, batch_id TEXT, expiry_date DATE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
     c.execute("PRAGMA table_info(vouchers)")
     vouch_cols = [col[1] for col in c.fetchall()]
-    if 'batch_id' not in vouch_cols: c.execute("ALTER TABLE vouchers ADD COLUMN batch_id TEXT")
+    for col in ['batch_id','expiry_date']:
+        if col not in vouch_cols: c.execute(f"ALTER TABLE vouchers ADD COLUMN {col} TEXT")
+
     c.execute('''CREATE TABLE IF NOT EXISTS subscribers (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, phone TEXT, current_ip TEXT, suspended INTEGER DEFAULT 0, package_name TEXT, expiry_date DATE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id))''')
     c.execute('''CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, voucher_id INTEGER, subscriber_id INTEGER, provider_id INTEGER, mac_address TEXT, ip_address TEXT, started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, ended_at TIMESTAMP, data_download REAL DEFAULT 0, data_upload REAL DEFAULT 0, FOREIGN KEY(voucher_id) REFERENCES vouchers(id), FOREIGN KEY(subscriber_id) REFERENCES subscribers(id))''')
     c.execute('''CREATE TABLE IF NOT EXISTS restricted (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER, phone_number TEXT, mac_address TEXT, reason TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
@@ -85,6 +94,12 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS mikrotik_routers (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, name TEXT NOT NULL, ip_address TEXT, username TEXT, password TEXT, api_port INTEGER DEFAULT 8728, is_active INTEGER DEFAULT 1, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     c.execute('''CREATE TABLE IF NOT EXISTS trial_used (id INTEGER PRIMARY KEY AUTOINCREMENT, ip_address TEXT UNIQUE, used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     c.execute('''CREATE TABLE IF NOT EXISTS yo_tx (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, tx_ref TEXT UNIQUE, phone TEXT, amount INTEGER, status TEXT DEFAULT 'pending', voucher_code TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+
+    # New tables
+    c.execute('''CREATE TABLE IF NOT EXISTS expiry_dates (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, user_id INTEGER NOT NULL, expiry_date TIMESTAMP, grace_period INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id), FOREIGN KEY(user_id) REFERENCES subscribers(id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS ip_bindings (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, mikrotik_id INTEGER, name TEXT NOT NULL, package_id INTEGER, dhcp_lease TEXT, address TEXT NOT NULL, mac_address TEXT NOT NULL, expires_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id), FOREIGN KEY(mikrotik_id) REFERENCES mikrotik_routers(id), FOREIGN KEY(package_id) REFERENCES plans(id))''')
+
+    # Default provider + plans
     c.execute("SELECT COUNT(*) FROM providers WHERE id=1")
     if c.fetchone()[0] == 0:
         hashed = generate_password_hash('admin123')
@@ -101,6 +116,9 @@ def init_db():
     conn.commit()
     conn.close()
 
+# ------------------------------------------------------------
+# HELPERS
+# ------------------------------------------------------------
 def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect('rockabywifi.db')
@@ -136,10 +154,8 @@ def generate_voucher_code():
 
 def get_plan_options(pid, public_only=True):
     db=get_db()
-    if public_only:
-        plans=db.execute("SELECT id,name,duration_minutes,price_ugx FROM plans WHERE provider_id=? AND is_active=1 AND is_public=1",(pid,)).fetchall()
-    else:
-        plans=db.execute("SELECT id,name,duration_minutes,price_ugx FROM plans WHERE provider_id=? AND is_active=1",(pid,)).fetchall()
+    if public_only: plans=db.execute("SELECT id,name,duration_minutes,price_ugx FROM plans WHERE provider_id=? AND is_active=1 AND is_public=1",(pid,)).fetchall()
+    else: plans=db.execute("SELECT id,name,duration_minutes,price_ugx FROM plans WHERE provider_id=? AND is_active=1",(pid,)).fetchall()
     return ''.join(f'<option value="{p["id"]}">{p["name"]} – {p["duration_minutes"]} min – UGX {p["price_ugx"]:,}</option>' for p in plans)
 
 def get_pending_count():
@@ -181,6 +197,32 @@ def seed_sample_data():
         plan=random.choice(plans); db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used) VALUES (1,?,?,'sms',?,?)",(generate_voucher_code(),plan['id'],random.choice(phones),1 if random.random()>0.3 else 0))
     db.commit()
 
+# ------------------------------------------------------------
+# YO! PAYMENTS HELPER
+# ------------------------------------------------------------
+def yo_charge(phone, amount, plan_name, provider):
+    if not provider['yo_username'] or not provider['yo_password']: return None
+    ref = f"ROCK-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(1000,9999)}"
+    payload = {"username": provider['yo_username'], "password": provider['yo_password'], "phone_number": clean_number(phone), "amount": str(amount), "currency": "UGX", "external_ref": ref, "callback_url": url_for('yo_callback', _external=True)}
+    try:
+        resp = requests.post("https://paymentsapi.yo.co.ug/v1/collection", json=payload, headers={"Content-Type":"application/json"})
+        data = resp.json()
+        if data.get('transaction_status') == 'SUCCEEDED':
+            db = get_db()
+            plan = db.execute("SELECT id, duration_minutes FROM plans WHERE provider_id=? AND price_ugx=? AND is_active=1 LIMIT 1",(provider['id'], amount)).fetchone()
+            if plan:
+                code = generate_voucher_code()
+                db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used,used_at) VALUES (?,?,?,'yo',?,1,CURRENT_TIMESTAMP)",(provider['id'],code,plan['id'],phone))
+                db.execute("INSERT INTO yo_tx (provider_id,tx_ref,phone,amount,status,voucher_code) VALUES (?,?,?,?,'completed',?)",(provider['id'],ref,phone,amount,code))
+                db.commit(); mt_add_user(phone, plan['duration_minutes'])
+            return 'instant_success'
+        if data.get('status') == 'success':
+            db = get_db()
+            db.execute("INSERT INTO yo_tx (provider_id,tx_ref,phone,amount,status) VALUES (?,?,?,?,'pending')",(provider['id'],ref,phone,amount))
+            db.commit(); return data.get('redirect_url')
+    except Exception as e: print(f"Yo! Payments error: {e}")
+    return None
+
 base_template = """
 <!DOCTYPE html>
 <html lang="en">
@@ -191,176 +233,37 @@ base_template = """
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        :root {
-            --primary: #1a73e8;
-            --primary-dark: #1557b0;
-            --bg: #f0f4f8;
-            --card-bg: #ffffff;
-            --text: #1a1a1a;
-            --text-secondary: #666666;
-            --border: #e0e0e0;
-            --radius: 12px;
-            --shadow: 0 1px 3px rgba(0,0,0,0.1);
-            --sidebar-width: 250px;
-        }
-        .dark-mode {
-            --bg: #1e293b;
-            --card-bg: #334155;
-            --text: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --border: #475569;
-        }
+        :root { --primary: #1a73e8; --primary-dark: #1557b0; --bg: #f0f4f8; --card-bg: #ffffff; --text: #1a1a1a; --text-secondary: #666666; --border: #e0e0e0; --radius: 12px; --shadow: 0 1px 3px rgba(0,0,0,0.1); --sidebar-width: 250px; }
+        .dark-mode { --bg: #1e293b; --card-bg: #334155; --text: #f1f5f9; --text-secondary: #94a3b8; --border: #475569; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
         .admin-layout { display: flex; }
-        .sidebar {
-            width: var(--sidebar-width);
-            background: #1e293b;
-            color: #fff;
-            height: 100vh;
-            position: fixed;
-            left: 0;
-            top: 0;
-            overflow-y: auto;
-            transition: transform 0.3s;
-            z-index: 1000;
-        }
+        .sidebar { width: var(--sidebar-width); background: #1e293b; color: #fff; height: 100vh; position: fixed; left: 0; top: 0; overflow-y: auto; transition: transform 0.3s; z-index: 1000; }
         .sidebar.collapsed { transform: translateX(-100%); }
-        .sidebar-header {
-            padding: 20px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 10px; }
         .sidebar-header img { height: 36px; width: 36px; border-radius: 8px; }
         .sidebar-header h3 { font-size: 1.1rem; font-weight: 600; }
         .sidebar-menu { padding: 10px 0; }
-        .sidebar-menu a {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px 20px;
-            color: #cbd5e1;
-            text-decoration: none;
-            transition: background 0.2s;
-            font-size: 0.9rem;
-        }
-        .sidebar-menu a:hover, .sidebar-menu a.active {
-            background: rgba(255,255,255,0.1);
-            color: #fff;
-        }
-        .sidebar-menu .badge {
-            background: var(--primary);
-            color: #fff;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.75rem;
-            margin-left: auto;
-        }
-        .main-content {
-            margin-left: var(--sidebar-width);
-            flex: 1;
-            transition: margin-left 0.3s;
-        }
+        .sidebar-menu a { display: flex; align-items: center; gap: 10px; padding: 10px 20px; color: #cbd5e1; text-decoration: none; transition: background 0.2s; font-size: 0.9rem; }
+        .sidebar-menu a:hover, .sidebar-menu a.active { background: rgba(255,255,255,0.1); color: #fff; }
+        .sidebar-menu .badge { background: var(--primary); color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; margin-left: auto; }
+        .main-content { margin-left: var(--sidebar-width); flex: 1; transition: margin-left 0.3s; }
         .main-content.expanded { margin-left: 0; }
-        .topbar {
-            background: var(--card-bg);
-            padding: 12px 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        .hamburger {
-            font-size: 1.5rem;
-            cursor: pointer;
-            background: none;
-            border: none;
-            color: var(--text);
-            display: block;
-        }
-        .topbar-right {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            position: relative;
-        }
+        .topbar { background: var(--card-bg); padding: 12px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); display: flex; align-items: center; justify-content: space-between; }
+        .hamburger { font-size: 1.5rem; cursor: pointer; background: none; border: none; color: var(--text); display: block; }
+        .topbar-right { display: flex; align-items: center; gap: 15px; position: relative; }
         .topbar-right .settings-dropdown { position: relative; display: inline-block; }
-        .settings-dropdown-content {
-            display: none;
-            position: absolute;
-            right: 0;
-            top: 100%;
-            background: white;
-            min-width: 160px;
-            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-            z-index: 10;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        .settings-dropdown-content a {
-            color: #333;
-            padding: 10px 15px;
-            text-decoration: none;
-            display: block;
-        }
+        .settings-dropdown-content { display: none; position: absolute; right: 0; top: 100%; background: white; min-width: 160px; box-shadow: 0 8px 16px rgba(0,0,0,0.2); z-index: 10; border-radius: 8px; overflow: hidden; }
+        .settings-dropdown-content a { color: #333; padding: 10px 15px; text-decoration: none; display: block; }
         .settings-dropdown-content a:hover { background: #f1f1f1; }
         .settings-dropdown:hover .settings-dropdown-content { display: block; }
-        .theme-toggle {
-            background: none;
-            border: none;
-            color: var(--text);
-            font-size: 1.2rem;
-            cursor: pointer;
-        }
-        .container { max-width: 1200px; margin: 20px auto; padding: 0 15px; }
-        .card {
-            background: var(--card-bg);
-            border-radius: var(--radius);
-            padding: 24px;
-            margin-bottom: 16px;
-            box-shadow: var(--shadow);
-            border: 1px solid var(--border);
-        }
-        .card-header {
-            font-size: 1.2rem;
-            font-weight: 600;
-            margin-bottom: 15px;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
+        .theme-toggle { background: none; border: none; color: var(--text); font-size: 1.2rem; cursor: pointer; }
+        .container { max-width: 1300px; margin: 20px auto; padding: 0 15px; }
+        .card { background: var(--card-bg); border-radius: var(--radius); padding: 24px; margin-bottom: 16px; box-shadow: var(--shadow); border: 1px solid var(--border); }
+        .card-header { font-size: 1.2rem; font-weight: 600; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
         label { display: block; margin-top: 15px; font-weight: 500; }
-        input, textarea, select {
-            width: 100%;
-            padding: 10px 12px;
-            margin-top: 5px;
-            border-radius: 6px;
-            border: 1px solid var(--border);
-            font-size: 0.95rem;
-            background: var(--card-bg);
-            color: var(--text);
-        }
-        .btn {
-            display: inline-block;
-            padding: 10px 20px;
-            background: var(--primary);
-            color: #fff;
-            border: none;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            text-decoration: none;
-            font-size: 0.9rem;
-        }
+        input, textarea, select { width: 100%; padding: 10px 12px; margin-top: 5px; border-radius: 6px; border: 1px solid var(--border); font-size: 0.95rem; background: var(--card-bg); color: var(--text); }
+        .btn { display: inline-block; padding: 10px 20px; background: var(--primary); color: #fff; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; text-decoration: none; font-size: 0.9rem; }
         .btn:hover { background: var(--primary-dark); }
         .btn-outline { background: transparent; border: 1px solid var(--primary); color: var(--primary); }
         .btn-small { padding: 5px 10px; font-size: 0.8rem; }
@@ -373,53 +276,12 @@ base_template = """
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border); }
         .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
-        .stat-card {
-            background: var(--card-bg);
-            border-radius: var(--radius);
-            padding: 20px;
-            box-shadow: var(--shadow);
-            border: 1px solid var(--border);
-            text-align: center;
-        }
+        .stat-card { background: var(--card-bg); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); border: 1px solid var(--border); text-align: center; }
         .stat-card h3 { font-size: 2rem; color: var(--primary); }
-        .voucher-code {
-            font-size: 1.5rem;
-            font-weight: 700;
-            letter-spacing: 1px;
-            background: var(--primary);
-            color: #ffffff;
-            padding: 10px 15px;
-            border-radius: 8px;
-            display: inline-block;
-            margin: 10px 0;
-        }
-        .whatsapp-float {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #25D366;
-            color: white;
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 30px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            z-index: 999;
-            text-decoration: none;
-        }
+        .voucher-code { font-size: 1.5rem; font-weight: 700; letter-spacing: 1px; background: var(--primary); color: #ffffff; padding: 10px 15px; border-radius: 8px; display: inline-block; margin: 10px 0; }
+        .whatsapp-float { position: fixed; bottom: 20px; right: 20px; background: #25D366; color: white; width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 30px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 999; text-decoration: none; }
         .dropdown { position: relative; display: inline-block; }
-        .dropdown-content {
-            display: none;
-            position: absolute;
-            background: white;
-            min-width: 200px;
-            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-            z-index: 1;
-            right: 0;
-        }
+        .dropdown-content { display: none; position: absolute; background: white; min-width: 200px; box-shadow: 0 8px 16px rgba(0,0,0,0.2); z-index: 1; right: 0; }
         .dropdown-content a { color: black; padding: 8px 12px; text-decoration: none; display: block; }
         .dropdown-content a:hover { background: #f1f1f1; }
         .dropdown:hover .dropdown-content { display: block; }
@@ -429,42 +291,33 @@ base_template = """
         .remember-row input[type="checkbox"] { width: auto; margin-right: 8px; }
         .chart-container { position: relative; width: 100%; max-height: 350px; margin: 20px 0; }
         .tabs { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
-        .tab { padding: 8px 16px; border-radius: 20px; cursor: pointer; background: var(--bg); border: 1px solid var(--border); font-size: 0.9rem; }
+        .tab { padding: 8px 16px; border-radius: 20px; cursor: pointer; background: var(--bg); border: 1px solid var(--border); font-size: 0.9rem; text-decoration: none; color: var(--text); }
         .tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
         .copy-btn { background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-left: 10px; }
-        @media (max-width: 768px) {
-            .sidebar { transform: translateX(-100%); }
-            .sidebar.open { transform: translateX(0); }
-            .main-content { margin-left: 0; }
-            .chart-container { max-height: 250px; }
-        }
+        .chart-row { display: flex; gap: 15px; flex-wrap: wrap; }
+        .chart-row .card { flex: 1; min-width: 350px; }
+        @media (max-width: 768px) { .sidebar { transform: translateX(-100%); } .sidebar.open { transform: translateX(0); } .main-content { margin-left: 0; } .chart-container { max-height: 250px; } .chart-row { flex-direction: column; } }
     </style>
 </head>
 <body class="{layout_class}">
     {sidebar_html}
     <div class="main-content" id="mainContent">
         {topbar_html}
-        <div class="container">
-            {content}
-        </div>
+        <div class="container">{content}</div>
         <footer>&copy; 2025 RockabyTech – WiFi Billing Made Simple</footer>
     </div>
     <a href="https://wa.me/{support_phone}?text=Hi%20RockabyWiFi%20Support" target="_blank" class="whatsapp-float">💬</a>
     <script>
         function toggleSidebar() {{
             var sb = document.getElementById('sidebar');
-            sb.classList.toggle('open');
-            sb.classList.toggle('collapsed');
+            sb.classList.toggle('open'); sb.classList.toggle('collapsed');
             document.getElementById('mainContent').classList.toggle('expanded');
         }}
         function toggleTheme() {{
             document.body.classList.toggle('dark-mode');
-            var isDark = document.body.classList.contains('dark-mode');
-            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            localStorage.setItem('theme', document.body.classList.contains('dark-mode') ? 'dark' : 'light');
         }}
-        if (localStorage.getItem('theme') === 'dark') {{
-            document.body.classList.add('dark-mode');
-        }}
+        if (localStorage.getItem('theme') === 'dark') {{ document.body.classList.add('dark-mode'); }}
     </script>
 </body>
 </html>
@@ -474,22 +327,25 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False):
     provider = get_provider(provider_id)
     sp = provider['support_phone'] if provider and provider['support_phone'] else '256751318876'
     if admin and session.get('provider_id'):
-        # Count badges for sidebar
         db = get_db()
         active_cnt = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=? AND used=0",(session['provider_id'],)).fetchone()['c']
         users_cnt = db.execute("SELECT COUNT(*) as c FROM subscribers WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         tix_cnt = db.execute("SELECT COUNT(*) as c FROM tickets WHERE provider_id=? AND status='open'",(session['provider_id'],)).fetchone()['c']
         leads_cnt = db.execute("SELECT COUNT(*) as c FROM leads WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
-        pkg_cnt = db.execute("SELECT COUNT(*) as c FROM plans WHERE provider_id=? AND is_active=1",(session['provider_id'],)).fetchone()['c']
+        pkg_cnt = db.execute("SELECT COUNT(*) as c FROM plans WHERE provider_id=? AND is_active=1 AND is_public=1",(session['provider_id'],)).fetchone()['c']
         vouch_cnt = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         inv_cnt = db.execute("SELECT COUNT(*) as c FROM invoices WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         camp_cnt = db.execute("SELECT COUNT(*) as c FROM campaigns WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         mt_cnt = db.execute("SELECT COUNT(*) as c FROM mikrotik_routers WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         eq_cnt = db.execute("SELECT COUNT(*) as c FROM equipment WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
+        exp_cnt = db.execute("SELECT COUNT(*) as c FROM expiry_dates WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
+        ip_cnt = db.execute("SELECT COUNT(*) as c FROM ip_bindings WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         sidebar = f"""<div class="sidebar" id="sidebar"><div class="sidebar-header"><img src="/static/icon-192.png"><h3>ROCKABYTECH</h3></div><div class="sidebar-menu">
         <a href="/dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
         <a href="/active-users"><i class="fas fa-wifi"></i> Active Users <span class="badge">{active_cnt}</span></a>
         <a href="/users"><i class="fas fa-users"></i> Users <span class="badge">{users_cnt}</span></a>
+        <a href="/expiry-dates" style="padding-left:30px;font-size:0.85rem;"><i class="far fa-clock"></i> Expiry Dates <span class="badge">{exp_cnt}</span></a>
+        <a href="/ip-bindings" style="padding-left:30px;font-size:0.85rem;"><i class="fas fa-link"></i> IP Bindings <span class="badge">{ip_cnt}</span></a>
         <a href="/tickets"><i class="fas fa-ticket-alt"></i> Tickets <span class="badge">{tix_cnt}</span></a>
         <a href="/leads"><i class="fas fa-chart-line"></i> Leads <span class="badge">{leads_cnt}</span></a>
         <hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
@@ -517,56 +373,35 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False):
 # ------------------------------------------------------------
 @app.route('/')
 def home():
-    p = get_provider(1)
-    bn = p['business_name'] if p else 'RockabyWiFi'
-    logo = f'<img src="/static/uploads/{p["logo_image"]}" style="height:50px;width:50px;border-radius:10px;margin-right:12px;vertical-align:middle;object-fit:cover;border:2px solid var(--primary);" alt="{bn}">' if p and p['logo_image'] else ''
-    poster = f'<img src="/static/uploads/{p["poster_image"]}" style="width:100%;max-height:220px;object-fit:cover;border-radius:var(--radius);margin-bottom:15px;box-shadow:var(--shadow);" alt="Poster">' if p and p['poster_image'] else ''
+    p = get_provider(1); bn = p['business_name'] if p else 'RockabyWiFi'
+    logo = f'<img src="/static/uploads/{p["logo_image"]}" class="provider-logo" alt="{bn}">' if p and p['logo_image'] else ''
+    poster = f'<img src="/static/uploads/{p["poster_image"]}" class="provider-poster" alt="Poster">' if p and p['poster_image'] else ''
     content = f'''<div class="card" style="display:flex;align-items:center;">{logo}<h2 style="margin:0;">{bn}</h2></div>{poster}
     <div class="card"><div class="card-header">Choose a Plan</div>
-    <form method="GET" action="/sms-verify">
-        <label>Your Phone Number *</label><input type="tel" name="phone" required>
-        <label>Select Plan</label><select name="plan_id" required>{get_plan_options(1)}</select>
-        <button type="submit" class="btn" style="margin-top:20px;width:100%;">Continue to Payment</button>
-    </form></div>
-    <p style="text-align:center;margin-top:15px;">
-        <a href="/redeem" class="btn btn-outline">Already have a voucher?</a>
-        <a href="/subscriber-login" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a>
-    </p>
-    <p style="text-align:center;margin-top:10px;">
-        <a href="/free-trial" class="btn btn-outline" style="background:#28a745;color:white;border-color:#28a745;">🎁 Free 5-Minute Trial</a>
-    </p>'''
+    <form method="GET" action="/sms-verify"><label>Your Phone Number *</label><input type="tel" name="phone" required><label>Select Plan</label><select name="plan_id" required>{get_plan_options(1)}</select><button type="submit" class="btn" style="margin-top:20px;width:100%;">Continue to Payment</button></form></div>
+    <p style="text-align:center;margin-top:15px;"><a href="/redeem" class="btn btn-outline">Already have a voucher?</a> <a href="/subscriber-login" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a></p>
+    <p style="text-align:center;margin-top:10px;"><a href="/free-trial" class="btn btn-outline" style="background:#28a745;color:white;border-color:#28a745;">🎁 Free 5-Minute Trial</a></p>'''
     return render_page("Get Internet Access", content, get_pending_count())
 
 @app.route('/free-trial')
 def free_trial():
-    ip = request.remote_addr
-    db = get_db()
+    ip = request.remote_addr; db = get_db()
     if db.execute("SELECT COUNT(*) as cnt FROM trial_used WHERE ip_address=?",(ip,)).fetchone()['cnt'] > 0:
         return render_page("Free Trial",'<div class="card"><div class="alert alert-error">You have already used your free trial.</div><p><a href="/" class="btn">Back to Home</a></p></div>', get_pending_count(), admin=False)
     trial = db.execute("SELECT id, duration_minutes FROM plans WHERE provider_id=1 AND name='Free Trial' AND is_active=1").fetchone()
-    if not trial:
-        return render_page("Free Trial",'<div class="card"><div class="alert alert-error">Trial not available.</div></div>', get_pending_count(), admin=False)
+    if not trial: return render_page("Free Trial",'<div class="card"><div class="alert alert-error">Trial not available.</div></div>', get_pending_count(), admin=False)
     code = generate_voucher_code()
     db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, ip_address, used) VALUES (1, ?, ?, 'trial', ?, 0)",(code, trial['id'], ip))
-    db.execute("INSERT INTO trial_used (ip_address) VALUES (?)",(ip,))
-    db.commit()
-    content = f'''<div class="card"><div class="alert alert-success">Free trial activated!</div>
-    <p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{code}</div>
-    <button class="copy-btn" onclick="navigator.clipboard.writeText('{code}')">📋 Copy</button>
-    <p style="margin-top:10px;">Use this code on the <a href="/redeem">Redeem page</a> to connect for 5 minutes.</p>
-    <a href="/" class="btn">Back to Home</a></div>'''
+    db.execute("INSERT INTO trial_used (ip_address) VALUES (?)",(ip,)); db.commit()
+    content = f'''<div class="card"><div class="alert alert-success">Free trial activated!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{code}</div><button class="copy-btn" onclick="navigator.clipboard.writeText('{code}')">📋 Copy</button><p style="margin-top:10px;">Use this code on the <a href="/redeem">Redeem page</a> to connect for 5 minutes.</p><a href="/" class="btn">Back to Home</a></div>'''
     return render_page("Free Trial", content, get_pending_count(), admin=False)
 
 @app.route('/redeem', methods=['GET','POST'])
 def redeem():
     if request.method == 'POST':
-        code = request.form['code'].strip().upper()
-        db = get_db()
+        code = request.form['code'].strip().upper(); db = get_db()
         v = db.execute("SELECT v.id, v.phone_number, p.duration_minutes FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.code=? AND v.used=0",(code,)).fetchone()
-        if v:
-            db.execute("UPDATE vouchers SET used=1, used_at=CURRENT_TIMESTAMP WHERE id=?",(v['id'],)); db.commit()
-            mt_add_user(v['phone_number'] or 'trial', v['duration_minutes'])
-            return render_page("Voucher Redeemed",'<div class="card"><div class="alert alert-success">Connected! Enjoy your internet access.</div><a href="/" class="btn">Back to Home</a></div>', get_pending_count())
+        if v: db.execute("UPDATE vouchers SET used=1, used_at=CURRENT_TIMESTAMP WHERE id=?",(v['id'],)); db.commit(); mt_add_user(v['phone_number'] or 'trial', v['duration_minutes']); return render_page("Voucher Redeemed",'<div class="card"><div class="alert alert-success">Connected! Enjoy your internet access.</div><a href="/" class="btn">Back to Home</a></div>', get_pending_count())
         return render_page("Redeem Voucher",'<div class="card"><div class="alert alert-error">Invalid or already used voucher code.</div><form method="POST"><label>Enter Voucher Code</label><input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required><button type="submit" class="btn" style="margin-top:15px;width:100%;">Redeem</button></form></div>', get_pending_count())
     return render_page("Redeem Voucher",'<div class="card"><div class="card-header">Redeem Voucher</div><form method="POST"><label>Enter Voucher Code</label><input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required><button type="submit" class="btn" style="margin-top:15px;width:100%;">Redeem</button></form></div>', get_pending_count())
 
@@ -592,44 +427,23 @@ def sms_verify():
             else:
                 rl = parsed['recipient_name'].lower()
                 if prov['mtn_number'] and prov['mtn_number'] not in rl and prov['airtel_number'] and prov['airtel_number'] not in rl: err = "Payment not sent to the correct provider number."
-        if err:
-            content = f'<div class="card"><div class="alert alert-error">{err}</div><form method="POST"><input type="hidden" name="phone" value="{phone}"><input type="hidden" name="plan_id" value="{plan_id}"><label>Paste Full MTN/Airtel SMS Here</label><textarea name="raw_sms" rows="6" required></textarea><button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button></form></div>'
-            return render_page("Verify Payment", content, pc)
-        if db.execute("SELECT COUNT(*) as cnt FROM voucher_requests WHERE transaction_id=?",(parsed['tid'],)).fetchone()['cnt'] > 0:
-            return render_page("Verify Payment",'<div class="card"><div class="alert alert-error">This Transaction ID has already been used.</div><p><a href="/" class="btn">Back to Home</a></p></div>', pc)
+        if err: return render_page("Verify Payment",f'<div class="card"><div class="alert alert-error">{err}</div><form method="POST"><input type="hidden" name="phone" value="{phone}"><input type="hidden" name="plan_id" value="{plan_id}"><label>Paste Full MTN/Airtel SMS Here</label><textarea name="raw_sms" rows="6" required></textarea><button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button></form></div>', pc)
+        if db.execute("SELECT COUNT(*) as cnt FROM voucher_requests WHERE transaction_id=?",(parsed['tid'],)).fetchone()['cnt'] > 0: return render_page("Verify Payment",'<div class="card"><div class="alert alert-error">This Transaction ID has already been used.</div><p><a href="/" class="btn">Back to Home</a></p></div>', pc)
         auto = prov['auto_approve'] if prov else 1; status = 'approved' if auto else 'pending'; vc = None
         rf = f"{parsed.get('recipient_name','')} {parsed.get('recipient_number','')}".strip()
         if status == 'approved':
             vc = generate_voucher_code()
             db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (1,?,?,'sms',?)",(vc,plan_id,phone))
-            db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status, voucher_code) VALUES (1,?,?,?,?,?,?,?,'approved',?)",(phone,plan_id,raw,parsed['tid'],parsed['amount'],rf,parsed['date'],vc))
-            db.commit()
+            db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status, voucher_code) VALUES (1,?,?,?,?,?,?,?,'approved',?)",(phone,plan_id,raw,parsed['tid'],parsed['amount'],rf,parsed['date'],vc)); db.commit()
             content = f'<div class="card"><div class="alert alert-success">Payment verified!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{vc}</div><button class="copy-btn" onclick="navigator.clipboard.writeText(\'{vc}\')">📋 Copy</button><p style="margin-top:10px;">Use this code on the <a href="/redeem">Redeem page</a> to connect.</p><a href="/" class="btn">Back to Home</a></div>'
         else:
-            db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status) VALUES (1,?,?,?,?,?,?,?,'pending')",(phone,plan_id,raw,parsed['tid'],parsed['amount'],rf,parsed['date']))
-            db.commit()
+            db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status) VALUES (1,?,?,?,?,?,?,?,'pending')",(phone,plan_id,raw,parsed['tid'],parsed['amount'],rf,parsed['date'])); db.commit()
             content = '<div class="card"><div class="alert alert-success">Payment submitted! Waiting for approval.</div><p><a href="/" class="btn">Back to Home</a></p></div>'
         return render_page("Verification Result", content, get_pending_count())
 
-    # GET – show payment options
-    provider = get_provider(1)
-    auto_pay = provider['yo_auto_pay'] if provider and provider['yo_auto_pay'] else 0
-    auto_btn = ''
-    if auto_pay and provider['yo_username'] and provider['yo_password']:
-        auto_btn = f'<a href="/yo-pay?phone={phone}&plan_id={plan_id}" class="btn" style="display:block;margin-top:10px;width:100%;background:#28a745;text-align:center;">📱 Pay with Mobile Money (Auto)</a>'
-    content = f'''<div class="card"><div class="card-header">Pay for Internet</div>
-    <p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p>
-    <p><strong>Pay to:</strong></p><p>MTN: 0785686404 | Airtel: 0751318876</p>
-    <p style="color:#666;">Name: Rocky Peter Abayo</p><hr>
-    {auto_btn}
-    <p style="margin-top:15px;"><strong>Or pay manually:</strong></p>
-    <p>After payment, paste the full SMS below:</p>
-    <form method="POST">
-        <input type="hidden" name="phone" value="{phone}"><input type="hidden" name="plan_id" value="{plan_id}">
-        <label>Paste Full MTN/Airtel SMS Here</label>
-        <textarea name="raw_sms" rows="6" required></textarea>
-        <button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button>
-    </form></div>'''
+    provider = get_provider(1); auto_pay = provider['yo_auto_pay'] if provider and provider['yo_auto_pay'] else 0; auto_btn = ''
+    if auto_pay and provider['yo_username'] and provider['yo_password']: auto_btn = f'<a href="/yo-pay?phone={phone}&plan_id={plan_id}" class="btn" style="display:block;margin-top:10px;width:100%;background:#28a745;text-align:center;">📱 Pay with Mobile Money (Auto)</a>'
+    content = f'''<div class="card"><div class="card-header">Pay for Internet</div><p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p><p><strong>Pay to:</strong></p><p>MTN: 0785686404 | Airtel: 0751318876</p><p style="color:#666;">Name: Rocky Peter Abayo</p><hr>{auto_btn}<p style="margin-top:15px;"><strong>Or pay manually:</strong></p><p>After payment, paste the full SMS below:</p><form method="POST"><input type="hidden" name="phone" value="{phone}"><input type="hidden" name="plan_id" value="{plan_id}"><label>Paste Full MTN/Airtel SMS Here</label><textarea name="raw_sms" rows="6" required></textarea><button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button></form></div>'''
     return render_page("Verify Payment", content, pc)
 
 @app.route('/yo-pay')
@@ -637,36 +451,30 @@ def yo_pay():
     phone = request.args.get('phone',''); plan_id = request.args.get('plan_id','1')
     db = get_db(); plan = db.execute("SELECT * FROM plans WHERE id=?",(plan_id,)).fetchone()
     if not plan: return "Invalid plan.", 400
-    provider = get_provider(1)
-    result = yo_charge(phone, plan['price_ugx'], plan['name'], provider)
-    if result == 'instant_success':
-        return redirect("https://google.com")
-    if result:
-        return redirect(result)
+    provider = get_provider(1); result = yo_charge(phone, plan['price_ugx'], plan['name'], provider)
+    if result == 'instant_success': return redirect("https://google.com")
+    if result: return redirect(result)
     return render_page("Payment Error",f'<div class="card"><div class="alert alert-error">Automatic payment is unavailable. Please use manual payment.</div><p><a href="/sms-verify?phone={phone}&plan_id={plan_id}" class="btn">Manual Payment</a></p></div>', get_pending_count(), admin=False)
 
 @app.route('/yo-callback', methods=['POST'])
 def yo_callback():
     data = request.get_json()
     if data and data.get('transaction_status') == 'SUCCEEDED':
-        tx_ref = data.get('external_ref')
-        db = get_db()
+        tx_ref = data.get('external_ref'); db = get_db()
         tx = db.execute("SELECT * FROM yo_tx WHERE tx_ref=? AND status='pending'",(tx_ref,)).fetchone()
         if tx:
             plan = db.execute("SELECT id, duration_minutes FROM plans WHERE provider_id=? AND price_ugx=? AND is_active=1 LIMIT 1",(tx['provider_id'], tx['amount'])).fetchone()
             if plan:
                 code = generate_voucher_code()
                 db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used,used_at) VALUES (?,?,?,'yo',?,1,CURRENT_TIMESTAMP)",(tx['provider_id'],code,plan['id'],tx['phone']))
-                db.execute("UPDATE yo_tx SET status='completed', voucher_code=? WHERE tx_ref=?",(code, tx_ref))
-                db.commit()
-                mt_add_user(tx['phone'], plan['duration_minutes'])
+                db.execute("UPDATE yo_tx SET status='completed', voucher_code=? WHERE tx_ref=?",(code, tx_ref)); db.commit(); mt_add_user(tx['phone'], plan['duration_minutes'])
     return 'OK', 200
 
 @app.route('/subscriber-login', methods=['GET','POST'])
 def subscriber_login():
     if request.method == 'POST':
-        u = request.form['username'].strip(); pw = request.form['password']
-        db = get_db(); sub = db.execute("SELECT id, password_hash, suspended FROM subscribers WHERE username=? AND provider_id=1",(u,)).fetchone()
+        u = request.form['username'].strip(); pw = request.form['password']; db = get_db()
+        sub = db.execute("SELECT id, password_hash, suspended FROM subscribers WHERE username=? AND provider_id=1",(u,)).fetchone()
         if sub and check_password_hash(sub['password_hash'],pw) and not sub['suspended']:
             db.execute("DELETE FROM sessions WHERE subscriber_id=?",(sub['id'],)); ip = request.remote_addr
             db.execute("INSERT INTO sessions (subscriber_id, provider_id, ip_address) VALUES (?,1,?)",(sub['id'],ip))
@@ -682,9 +490,7 @@ def subscriber_portal():
 
 @app.route('/subscriber-logout')
 def subscriber_logout():
-    if 'subscriber_id' in session:
-        db = get_db(); db.execute("DELETE FROM sessions WHERE subscriber_id=?",(session['subscriber_id'],)); db.commit()
-        session.pop('subscriber_id',None); session.pop('subscriber_name',None)
+    if 'subscriber_id' in session: db = get_db(); db.execute("DELETE FROM sessions WHERE subscriber_id=?",(session['subscriber_id'],)); db.commit(); session.pop('subscriber_id',None); session.pop('subscriber_name',None)
     return redirect('/')
 
 # ------------------------------------------------------------
@@ -693,8 +499,8 @@ def subscriber_logout():
 @app.route('/login', methods=['GET','POST'])
 def login():
     if request.method == 'POST':
-        contact = request.form['contact'].strip(); pw = request.form['password']
-        db = get_db(); prov = db.execute("SELECT * FROM providers WHERE contact=?",(contact,)).fetchone()
+        contact = request.form['contact'].strip(); pw = request.form['password']; db = get_db()
+        prov = db.execute("SELECT * FROM providers WHERE contact=?",(contact,)).fetchone()
         if prov and check_password_hash(prov['password_hash'],pw) and prov['is_active']:
             session['provider_id']=prov['id']; session['provider_name']=prov['business_name']
             if request.form.get('remember'): session.permanent = True
@@ -714,53 +520,37 @@ def dashboard():
     sms_bal = db.execute("SELECT COUNT(*) as c FROM sms_log WHERE provider_id=?",(pid,)).fetchone()['c']
     total_clients = db.execute("SELECT COUNT(DISTINCT phone_number) as c FROM vouchers WHERE provider_id=?",(pid,)).fetchone()['c']
     active_now = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=? AND used=0",(pid,)).fetchone()['c']
-    
-    # Package performance table
-    pkg_perf = db.execute("""SELECT p.name, p.price_ugx, COUNT(v.id) as active_users,
-        COALESCE(SUM(p.price_ugx),0) as monthly_rev, COALESCE(AVG(COALESCE(ds.data_download+ds.data_upload,0)),0) as avg_data
-        FROM plans p LEFT JOIN vouchers v ON v.plan_id=p.id AND v.used=0
-        LEFT JOIN data_sessions ds ON ds.phone_number=v.phone_number
-        WHERE p.provider_id=? AND p.is_active=1 AND p.is_public=1
-        GROUP BY p.id ORDER BY monthly_rev DESC""",(pid,)).fetchall()
+
+    pkg_perf = db.execute("""SELECT p.name, p.price_ugx, COUNT(v.id) as active_users, COALESCE(SUM(p.price_ugx),0) as monthly_rev, COALESCE(AVG(COALESCE(ds.data_download+ds.data_upload,0)),0) as avg_data FROM plans p LEFT JOIN vouchers v ON v.plan_id=p.id AND v.used=0 LEFT JOIN data_sessions ds ON ds.phone_number=v.phone_number WHERE p.provider_id=? AND p.is_active=1 AND p.is_public=1 GROUP BY p.id ORDER BY monthly_rev DESC""",(pid,)).fetchall()
     pkg_rows = ''
     for pr in pkg_perf:
         arpu = int(pr['monthly_rev'])/int(pr['active_users']) if int(pr['active_users']) > 0 else 0
-        pkg_rows += f'''<tr><td>{pr["name"]}</td><td>UGX {pr["price_ugx"]:,}</td><td>{pr["active_users"]}</td>
-        <td>UGX {pr["monthly_rev"]:,}</td><td>{format_data(pr["avg_data"])}</td><td>UGX {arpu:,.0f}</td></tr>'''
+        pkg_rows += f'<tr><td>{pr["name"]}</td><td>UGX {pr["price_ugx"]:,}</td><td>{pr["active_users"]}</td><td>UGX {pr["monthly_rev"]:,}</td><td>{format_data(pr["avg_data"])}</td><td>UGX {arpu:,.0f}</td></tr>'
     if not pkg_rows: pkg_rows = '<tr><td colspan="6">No packages yet.</td></tr>'
-    
-    content = f"""<div class="stat-grid">
-        <div class="stat-card"><h3>UGX {rev or 0:,}</h3><small>Amount this month</small></div>
-        <div class="stat-card"><h3>UGX 0</h3><small>SMS balance</small></div>
-        <div class="stat-card"><h3>{total_clients}</h3><small>Total clients</small></div>
-    </div>
-    <div class="card"><div class="card-header">📊 Payments <select id="pp" onchange="loadPay()" style="width:auto;display:inline;"><option value="today">Today</option><option value="this_week">This Week</option><option value="last_week">Last Week</option><option value="this_month">This Month</option><option value="last_month">Last Month</option><option value="this_year">This Year</option><option value="last_year">Last Year</option></select></div><div class="chart-container"><canvas id="payChart"></canvas></div></div>
-    <div class="card"><div class="card-header">👥 Active Users <small style="color:var(--text-secondary);">Active now: {active_now} users</small></div><div class="chart-container"><canvas id="auChart"></canvas></div></div>
-    <div class="card"><div class="card-header">📈 Customer Retention (6 months)</div><div class="chart-container"><canvas id="retChart"></canvas></div></div>
-    <div class="card"><div class="card-header">📅 Data Usage</div><div class="chart-container"><canvas id="duChart"></canvas></div></div>
-    <div class="card"><div class="card-header">📦 Package Utilization</div><div class="chart-container"><canvas id="pkgChart"></canvas></div></div>
-    <div class="card"><div class="card-header">🔮 Revenue Forecast (3 months)</div><div class="chart-container"><canvas id="fcChart"></canvas></div></div>
-    <div class="card"><div class="card-header">📱 Sent SMS</div><div class="chart-container"><canvas id="smsChart"></canvas></div></div>
-    <div class="card"><div class="card-header">📶 Network Data Usage</div><div class="chart-container"><canvas id="netChart"></canvas></div></div>
-    <div class="card"><div class="card-header">📋 User Registrations</div><div class="chart-container"><canvas id="regChart"></canvas></div></div>
-    <div class="card"><div class="card-header">⭐ Most Active Users (last 30 days)</div><table><thead><tr><th>Username</th><th>Data Used</th><th>Phone</th></tr></thead><tbody id="maTable"></tbody></table></div>
+
+    content = f"""<div class="stat-grid"><div class="stat-card"><h3>UGX {rev or 0:,}</h3><small>Amount this month</small></div><div class="stat-card"><h3>UGX 0</h3><small>SMS balance</small></div><div class="stat-card"><h3>{total_clients}</h3><small>Total clients</small></div></div>
+    <div class="chart-row"><div class="card"><div class="card-header">📊 Payments <select id="pp" onchange="loadPay()" style="width:auto;display:inline;"><option value="today">Today</option><option value="this_week">This Week</option><option value="last_week">Last Week</option><option value="this_month">This Month</option><option value="last_month">Last Month</option><option value="this_year">This Year</option><option value="last_year">Last Year</option></select></div><div class="chart-container"><canvas id="payChart"></canvas></div></div><div class="card"><div class="card-header">👥 Active Users <small style="color:var(--text-secondary);">Active now: {active_now} users</small></div><div class="chart-container"><canvas id="auChart"></canvas></div></div></div>
+    <div class="chart-row"><div class="card"><div class="card-header">📈 Customer Retention (6 months)</div><div class="chart-container"><canvas id="retChart"></canvas></div></div><div class="card"><div class="card-header">📅 Data Usage</div><div class="chart-container"><canvas id="duChart"></canvas></div></div></div>
+    <div class="chart-row"><div class="card"><div class="card-header">📦 Package Utilization</div><div class="chart-container"><canvas id="pkgChart"></canvas></div></div><div class="card"><div class="card-header">🔮 Revenue Forecast (3 months)</div><div class="chart-container"><canvas id="fcChart"></canvas></div></div></div>
+    <div class="chart-row"><div class="card"><div class="card-header">📱 Sent SMS</div><div class="chart-container"><canvas id="smsChart"></canvas></div></div><div class="card"><div class="card-header">📶 Network Data Usage</div><div class="chart-container"><canvas id="netChart"></canvas></div></div></div>
+    <div class="chart-row"><div class="card"><div class="card-header">📋 User Registrations</div><div class="chart-container"><canvas id="regChart"></canvas></div></div><div class="card"><div class="card-header">⭐ Most Active Users (last 30 days)</div><table><thead><tr><th>Username</th><th>Data Used</th><th>Phone</th></tr></thead><tbody id="maTable"></tbody></table></div></div>
     <div class="card"><div class="card-header">🏆 Package Performance Comparison</div><table><thead><tr><th>Package Name</th><th>Price</th><th>Active Users</th><th>Monthly Revenue</th><th>Avg. Data Usage</th><th>ARPU</th></tr></thead><tbody>{pkg_rows}</tbody></table></div>
     <script>
-    async function loadPay(){{ var p=document.getElementById('pp').value; var r=await fetch('/api/payments?period='+p); var d=await r.json(); var ctx=document.getElementById('payChart').getContext('2d'); if(window.pc)window.pc.destroy(); window.pc=new Chart(ctx,{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'Payments (UGX)',data:d.values,backgroundColor:'#f5af19'}}]}},options:{{responsive:true,maintainAspectRatio:false}}}}); }}
+    async function loadPay(){{ var p=document.getElementById('pp').value; var r=await fetch('/api/payments?period='+p); var d=await r.json(); var ctx=document.getElementById('payChart').getContext('2d'); if(window.pc)window.pc.destroy(); window.pc=new Chart(ctx,{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'Payments (UGX)',data:d.values,backgroundColor:'#1a73e8'}}]}},options:{{responsive:true,maintainAspectRatio:false}}}}); }}
     fetch('/api/active-users-chart').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('auChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'Active',data:d.values,borderColor:'#28a745',fill:false}}]}}}}); }});
-    fetch('/api/retention').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('retChart').getContext('2d'),{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'New',data:d.new_cust,backgroundColor:'#f5af19'}},{{label:'Returning',data:d.returning,backgroundColor:'#28a745'}},{{label:'Churned',data:d.churned,backgroundColor:'#dc3545'}}]}}}}); }});
-    fetch('/api/data-usage').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('duChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'DL',data:d.downloads,borderColor:'#f5af19',fill:false}},{{label:'UL',data:d.uploads,borderColor:'#ffc107',fill:false}}]}},options:{{plugins:{{tooltip:{{callbacks:{{label:function(c){{return c.dataset.label+': '+(c.raw>=1000?(c.raw/1000).toFixed(2)+' GB':c.raw.toFixed(2)+' MB');}}}}}}}}}}); }});
-    fetch('/api/package-util').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('pkgChart').getContext('2d'),{{type:'doughnut',data:{{labels:d.labels,datasets:[{{data:d.values,backgroundColor:['#f5af19','#28a745','#ffc107','#dc3545','#6f42c1','#fd7e14']}}]}}}}); }});
-    fetch('/api/forecast').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('fcChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'Hist',data:d.historical,borderColor:'#f5af19',fill:false}},{{label:'Fcst',data:d.forecast,borderColor:'#28a745',borderDash:[5,5],fill:false}},{{label:'Upper',data:d.upper,borderColor:'#dc3545',borderDash:[2,2],fill:false,pointRadius:0}},{{label:'Lower',data:d.lower,borderColor:'#dc3545',borderDash:[2,2],fill:false,pointRadius:0}}]}}}}); }});
+    fetch('/api/retention').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('retChart').getContext('2d'),{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'New',data:d.new_cust,backgroundColor:'#1a73e8'}},{{label:'Returning',data:d.returning,backgroundColor:'#28a745'}},{{label:'Churned',data:d.churned,backgroundColor:'#dc3545'}}]}}}}); }});
+    fetch('/api/data-usage').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('duChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'DL',data:d.downloads,borderColor:'#1a73e8',fill:false}},{{label:'UL',data:d.uploads,borderColor:'#ffc107',fill:false}}]}},options:{{plugins:{{tooltip:{{callbacks:{{label:function(c){{return c.dataset.label+': '+(c.raw>=1000?(c.raw/1000).toFixed(2)+' GB':c.raw.toFixed(2)+' MB');}}}}}}}}}}); }});
+    fetch('/api/package-util').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('pkgChart').getContext('2d'),{{type:'doughnut',data:{{labels:d.labels,datasets:[{{data:d.values,backgroundColor:['#1a73e8','#28a745','#ffc107','#dc3545','#6f42c1','#fd7e14']}}]}}}}); }});
+    fetch('/api/forecast').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('fcChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'Hist',data:d.historical,borderColor:'#1a73e8',fill:false}},{{label:'Fcst',data:d.forecast,borderColor:'#28a745',borderDash:[5,5],fill:false}},{{label:'Upper',data:d.upper,borderColor:'#dc3545',borderDash:[2,2],fill:false,pointRadius:0}},{{label:'Lower',data:d.lower,borderColor:'#dc3545',borderDash:[2,2],fill:false,pointRadius:0}}]}}}}); }});
     fetch('/api/sms-stats').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('smsChart').getContext('2d'),{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'SMS',data:d.values,backgroundColor:'#6f42c1'}}]}}}}); }});
-    fetch('/api/network').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('netChart').getContext('2d'),{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'DL',data:d.downloads,backgroundColor:'#f5af19'}},{{label:'UL',data:d.uploads,backgroundColor:'#ffc107'}}]}},options:{{plugins:{{tooltip:{{callbacks:{{label:function(c){{return c.dataset.label+': '+(c.raw>=1000?(c.raw/1000).toFixed(2)+' GB':c.raw.toFixed(2)+' MB');}}}}}}}}}}); }});
+    fetch('/api/network').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('netChart').getContext('2d'),{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'DL',data:d.downloads,backgroundColor:'#1a73e8'}},{{label:'UL',data:d.uploads,backgroundColor:'#ffc107'}}]}},options:{{plugins:{{tooltip:{{callbacks:{{label:function(c){{return c.dataset.label+': '+(c.raw>=1000?(c.raw/1000).toFixed(2)+' GB':c.raw.toFixed(2)+' MB');}}}}}}}}}}); }});
     fetch('/api/registration').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('regChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'Regs',data:d.values,borderColor:'#fd7e14',fill:false}}]}}}}); }});
     fetch('/api/most-active').then(r=>r.json()).then(d=>{{ var rows=''; d.forEach(u=>{{ rows+=`<tr><td>${{u.username}}</td><td>${{u.data_usage}}</td><td>${{u.phone}}</td></tr>`; }}); document.getElementById('maTable').innerHTML=rows; }});
     loadPay();
     </script>"""
     return render_page("Dashboard", content, get_pending_count(), pid, admin=True)
 
-# API endpoints (identical to previous working version)
+# API endpoints (unchanged)
 @app.route('/api/payments')
 @login_required
 def api_payments():
@@ -774,17 +564,13 @@ def api_payments():
         months = [today.replace(month=m,day=1) for m in range(1,today.month+1)]
         rows = db.execute("SELECT strftime('%m',created_at) as m, COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ? GROUP BY m",(session['provider_id'],today.replace(month=1,day=1).isoformat())).fetchall()
         labels = [d.strftime('%b') for d in months]; values = [0]*len(months)
-        for r in rows:
-            idx = int(r['m'])-1
-            if idx < len(values): values[idx] = r['t']
+        for r in rows: idx = int(r['m'])-1; if idx < len(values): values[idx] = r['t']
         return {'labels':labels,'values':values}
     elif period == 'last_year':
         months = [today.replace(year=today.year-1,month=m,day=1) for m in range(1,13)]
         rows = db.execute("SELECT strftime('%m',created_at) as m, COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) BETWEEN ? AND ?",(session['provider_id'],today.replace(year=today.year-1,month=1,day=1).isoformat(),today.replace(year=today.year-1,month=12,day=31).isoformat())).fetchall()
         labels = [d.strftime('%b') for d in months]; values = [0]*12
-        for r in rows:
-            idx = int(r['m'])-1
-            if idx < 12: values[idx] = r['t']
+        for r in rows: idx = int(r['m'])-1; if idx < 12: values[idx] = r['t']
         return {'labels':labels,'values':values}
     else: dates = [today.replace(day=1)+timedelta(days=i) for i in range(today.day)]
     labels = [d.strftime('%d %b') for d in dates] if len(dates)>1 else [today.strftime('%d %b')]
@@ -794,8 +580,7 @@ def api_payments():
 @app.route('/api/active-users-chart')
 @login_required
 def api_active_users():
-    db = get_db(); today = date.today()
-    labels = [(today-timedelta(days=i)).strftime('%a') for i in range(6,-1,-1)]
+    db = get_db(); today = date.today(); labels = [(today-timedelta(days=i)).strftime('%a') for i in range(6,-1,-1)]
     vals = []
     for i in range(6,-1,-1):
         d = today-timedelta(days=i)
@@ -873,44 +658,6 @@ def api_package_perf():
     return {'labels':labels,'sales':sales,'revenue':rev}
 
 # ------------------------------------------------------------
-# YO! PAYMENTS HELPER
-# ------------------------------------------------------------
-def yo_charge(phone, amount, plan_name, provider):
-    if not provider['yo_username'] or not provider['yo_password']:
-        return None
-    ref = f"ROCK-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(1000,9999)}"
-    payload = {
-        "username": provider['yo_username'],
-        "password": provider['yo_password'],
-        "phone_number": clean_number(phone),
-        "amount": str(amount),
-        "currency": "UGX",
-        "external_ref": ref,
-        "callback_url": url_for('yo_callback', _external=True),
-    }
-    try:
-        resp = requests.post("https://paymentsapi.yo.co.ug/v1/collection", json=payload, headers={"Content-Type":"application/json"})
-        data = resp.json()
-        if data.get('transaction_status') == 'SUCCEEDED':
-            db = get_db()
-            plan = db.execute("SELECT id, duration_minutes FROM plans WHERE provider_id=? AND price_ugx=? AND is_active=1 LIMIT 1",(provider['id'], amount)).fetchone()
-            if plan:
-                code = generate_voucher_code()
-                db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used,used_at) VALUES (?,?,?,'yo',?,1,CURRENT_TIMESTAMP)",(provider['id'],code,plan['id'],phone))
-                db.execute("INSERT INTO yo_tx (provider_id,tx_ref,phone,amount,status,voucher_code) VALUES (?,?,?,?,'completed',?)",(provider['id'],ref,phone,amount,code))
-                db.commit()
-                mt_add_user(phone, plan['duration_minutes'])
-            return 'instant_success'
-        if data.get('status') == 'success':
-            db = get_db()
-            db.execute("INSERT INTO yo_tx (provider_id,tx_ref,phone,amount,status) VALUES (?,?,?,?,'pending')",(provider['id'],ref,phone,amount))
-            db.commit()
-            return data.get('redirect_url')
-    except Exception as e:
-        print(f"Yo! Payments error: {e}")
-    return None
-
-# ------------------------------------------------------------
 # ACTIVE USERS
 # ------------------------------------------------------------
 @app.route('/active-users')
@@ -978,18 +725,135 @@ def subscribers():
     db = get_db()
     if request.method == 'POST':
         u = request.form['username'].strip(); pw = request.form['password']; ph = request.form.get('phone','').strip()
-        try: db.execute("INSERT INTO subscribers (provider_id,username,password_hash,phone) VALUES (?,?,?,?)",(session['provider_id'],u,generate_password_hash(pw),ph)); db.commit()
+        pkg_id = request.form.get('package_id',''); expiry = request.form.get('expiry_date','')
+        pkg_name = db.execute("SELECT name FROM plans WHERE id=?",(pkg_id,)).fetchone()
+        try: db.execute("INSERT INTO subscribers (provider_id,username,password_hash,phone,package_name,expiry_date) VALUES (?,?,?,?,?,?)",(session['provider_id'],u,generate_password_hash(pw),ph,pkg_name['name'] if pkg_name else '',expiry)); db.commit()
         except: return render_page("Users",'<div class="card"><div class="alert alert-error">Username already exists.</div><p><a href="/users">Back</a></p></div>', get_pending_count(), admin=True)
         return redirect('/users')
-    subs = db.execute("SELECT id,username,phone,suspended FROM subscribers WHERE provider_id=?",(session['provider_id'],)).fetchall()
-    rows = ''.join(f'<tr><td>{s["username"]}</td><td>{s["phone"]}</td><td>{"Suspended" if s["suspended"] else "Active"}</td><td><a href="/delete-subscriber/{s["id"]}" class="btn btn-small btn-danger">Delete</a></td></tr>' for s in subs) or '<tr><td colspan="4">No subscribers.</td></tr>'
-    return render_page("Users",f'<div class="card"><div class="card-header">Subscriber Accounts</div><form method="POST"><label>Username</label><input type="text" name="username" required><label>Password</label><input type="password" name="password" required><label>Phone (optional)</label><input type="tel" name="phone"><button type="submit" class="btn btn-success" style="margin-top:15px;">Create Subscriber</button></form><table style="margin-top:20px;"><tr><th>Username</th><th>Phone</th><th>Status</th><th>Action</th></tr>{rows}</table></div>', get_pending_count(), admin=True)
+    pkg_opts = get_plan_options(session['provider_id'], public_only=False)
+    return render_page("Create User",f'''<div class="card"><div class="card-header">Create User</div>
+    <form method="POST"><label>Username</label><input type="text" name="username" required><label>Password</label><input type="password" name="password" required><label>Phone (optional)</label><input type="tel" name="phone">
+    <label>Package*</label><select name="package_id" required>{pkg_opts}</select><a href="/plans/add" target="_blank" style="font-size:0.8rem;">+ Add new package</a>
+    <label>Expiry Date</label><input type="date" name="expiry_date"><button type="submit" class="btn btn-success" style="margin-top:15px;">Create Subscriber</button></form></div>''', get_pending_count(), admin=True)
 
 @app.route('/delete-subscriber/<int:sid>')
 @login_required
 def delete_subscriber(sid):
     db = get_db(); db.execute("DELETE FROM subscribers WHERE id=? AND provider_id=?",(sid,session['provider_id'])); db.execute("DELETE FROM sessions WHERE subscriber_id=?",(sid,)); db.commit()
     return redirect('/users')
+
+# ------------------------------------------------------------
+# EXPIRY DATES
+# ------------------------------------------------------------
+@app.route('/expiry-dates')
+@login_required
+def expiry_dates():
+    db = get_db()
+    items = db.execute("SELECT e.*, s.username FROM expiry_dates e JOIN subscribers s ON e.user_id=s.id WHERE e.provider_id=? ORDER BY e.expiry_date DESC",(session['provider_id'],)).fetchall()
+    rows = ''.join(f'<tr><td>{e["username"]}</td><td>{e["expiry_date"]}</td><td>{e["grace_period"]}</td><td><a href="/expiry-dates/edit/{e["id"]}" class="btn btn-small">Edit</a> <a href="/expiry-dates/delete/{e["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for e in items) or '<tr><td colspan="4">No expiry dates set.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Expiry Dates <a href="/expiry-dates/add" class="btn btn-success btn-small">Create Expiry Date</a></div>
+    <table><thead><tr><th>User</th><th>Expiry Date</th><th>Grace Period</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Expiry Dates", content, get_pending_count(), admin=True)
+
+@app.route('/expiry-dates/add', methods=['GET','POST'])
+@login_required
+def add_expiry_date():
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO expiry_dates (provider_id,user_id,expiry_date,grace_period) VALUES (?,?,?,?)",(session['provider_id'], int(request.form['user_id']), request.form['expiry_date'], int(request.form.get('grace',0)))); db.commit()
+        return redirect('/expiry-dates')
+    db = get_db(); users = db.execute("SELECT id, username FROM subscribers WHERE provider_id=?",(session['provider_id'],)).fetchall()
+    user_opts = ''.join(f'<option value="{u["id"]}">{u["username"]}</option>' for u in users)
+    return render_page("Create Expiry Date",f'''<div class="card"><div class="card-header">Create Expiry Date</div>
+    <form method="POST"><label>User*</label><select name="user_id" required>{user_opts}</select>
+    <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Hour</button>
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(hours=12)).strftime('%Y-%m-%dT%H:%M')}'">+ 12 Hours</button>
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Day</button>
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=7)).strftime('%Y-%m-%dT%H:%M')}'">+ 7 Days</button>
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=30)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Month</button>
+    </div>
+    <label>Expiry Date*</label><input type="datetime-local" name="expiry_date" required>
+    <label>Grace Period (days)</label><input type="number" name="grace" value="0">
+    <button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(), admin=True)
+
+@app.route('/expiry-dates/edit/<int:eid>', methods=['GET','POST'])
+@login_required
+def edit_expiry_date(eid):
+    db = get_db()
+    if request.method == 'POST': db.execute("UPDATE expiry_dates SET expiry_date=?,grace_period=? WHERE id=? AND provider_id=?",(request.form['expiry_date'],int(request.form.get('grace',0)),eid,session['provider_id'])); db.commit(); return redirect('/expiry-dates')
+    e = db.execute("SELECT * FROM expiry_dates WHERE id=? AND provider_id=?",(eid,session['provider_id'])).fetchone()
+    if not e: return "Not found", 404
+    users = db.execute("SELECT id, username FROM subscribers WHERE provider_id=?",(session['provider_id'],)).fetchall()
+    user_opts = ''.join(f'<option value="{u["id"]}" {"selected" if u["id"]==e["user_id"] else ""}>{u["username"]}</option>' for u in users)
+    return render_page("Edit Expiry Date",f'''<div class="card"><div class="card-header">Edit Expiry Date</div><form method="POST"><label>User</label><select name="user_id">{user_opts}</select>
+    <label>Expiry Date</label><input type="datetime-local" name="expiry_date" value="{e["expiry_date"]}" required>
+    <label>Grace Period (days)</label><input type="number" name="grace" value="{e["grace_period"]}">
+    <button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>''', get_pending_count(), admin=True)
+
+@app.route('/expiry-dates/delete/<int:eid>')
+@login_required
+def delete_expiry_date(eid): db = get_db(); db.execute("DELETE FROM expiry_dates WHERE id=? AND provider_id=?",(eid,session['provider_id'])); db.commit(); return redirect('/expiry-dates')
+
+# ------------------------------------------------------------
+# IP BINDINGS
+# ------------------------------------------------------------
+@app.route('/ip-bindings')
+@login_required
+def ip_bindings():
+    db = get_db()
+    items = db.execute("SELECT * FROM ip_bindings WHERE provider_id=? ORDER BY id DESC",(session['provider_id'],)).fetchall()
+    rows = ''.join(f'<tr><td>{i["name"]}</td><td>{i["mikrotik_id"] or "-"}</td><td>{i["address"]}</td><td>{i["package_id"] or "-"}</td><td>{i["expires_at"] or "-"}</td><td><a href="/ip-bindings/edit/{i["id"]}" class="btn btn-small">Edit</a> <a href="/ip-bindings/delete/{i["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for i in items) or '<tr><td colspan="6">No IP bindings.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">IP Bindings <a href="/ip-bindings/add" class="btn btn-success btn-small">Bind IP</a></div>
+    <table><thead><tr><th>Name</th><th>MikroTik</th><th>Address</th><th>Package</th><th>Expiry</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("IP Bindings", content, get_pending_count(), admin=True)
+
+@app.route('/ip-bindings/add', methods=['GET','POST'])
+@login_required
+def add_ip_binding():
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO ip_bindings (provider_id,mikrotik_id,name,package_id,dhcp_lease,address,mac_address,expires_at) VALUES (?,?,?,?,?,?,?,?)",
+                   (session['provider_id'], int(request.form.get('mikrotik_id',0)), request.form['name'], int(request.form.get('package_id',0)), request.form.get('dhcp',''), request.form['address'], request.form['mac'], request.form.get('expires_at'))); db.commit()
+        return redirect('/ip-bindings')
+    db = get_db()
+    routers = db.execute("SELECT id, name FROM mikrotik_routers WHERE provider_id=?",(session['provider_id'],)).fetchall()
+    router_opts = ''.join(f'<option value="{r["id"]}">{r["name"]}</option>' for r in routers)
+    packages = db.execute("SELECT id, name FROM plans WHERE provider_id=? AND is_active=1",(session['provider_id'],)).fetchall()
+    pkg_opts = ''.join(f'<option value="{p["id"]}">{p["name"]}</option>' for p in packages)
+    return render_page("Bind an IP",f'''<div class="card"><div class="card-header">Bind an IP</div>
+    <form method="POST"><label>MikroTik*</label><select name="mikrotik_id">{router_opts}</select>
+    <label>Name*</label><input type="text" name="name" required>
+    <label>Package</label><select name="package_id"><option value="">None</option>{pkg_opts}</select>
+    <label>DHCP Lease</label><input type="text" name="dhcp" placeholder="Select a DHCP lease to auto-fill">
+    <label>Address*</label><input type="text" name="address" required>
+    <label>MAC Address*</label><input type="text" name="mac" required>
+    <label>Expires At (Optional)</label><input type="datetime-local" name="expires_at">
+    <button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(), admin=True)
+
+@app.route('/ip-bindings/edit/<int:bid>', methods=['GET','POST'])
+@login_required
+def edit_ip_binding(bid):
+    db = get_db()
+    if request.method == 'POST': db.execute("UPDATE ip_bindings SET mikrotik_id=?,name=?,package_id=?,dhcp_lease=?,address=?,mac_address=?,expires_at=? WHERE id=? AND provider_id=?",
+                   (int(request.form.get('mikrotik_id',0)), request.form['name'], int(request.form.get('package_id',0)), request.form.get('dhcp',''), request.form['address'], request.form['mac'], request.form.get('expires_at'), bid, session['provider_id'])); db.commit(); return redirect('/ip-bindings')
+    b = db.execute("SELECT * FROM ip_bindings WHERE id=? AND provider_id=?",(bid,session['provider_id'])).fetchone()
+    if not b: return "Not found", 404
+    routers = db.execute("SELECT id, name FROM mikrotik_routers WHERE provider_id=?",(session['provider_id'],)).fetchall()
+    router_opts = ''.join(f'<option value="{r["id"]}" {"selected" if r["id"]==b["mikrotik_id"] else ""}>{r["name"]}</option>' for r in routers)
+    packages = db.execute("SELECT id, name FROM plans WHERE provider_id=? AND is_active=1",(session['provider_id'],)).fetchall()
+    pkg_opts = ''.join(f'<option value="{p["id"]}" {"selected" if p["id"]==b["package_id"] else ""}>{p["name"]}</option>' for p in packages)
+    return render_page("Edit IP Binding",f'''<div class="card"><div class="card-header">Edit IP Binding</div><form method="POST"><label>MikroTik</label><select name="mikrotik_id">{router_opts}</select>
+    <label>Name</label><input type="text" name="name" value="{b["name"]}" required>
+    <label>Package</label><select name="package_id"><option value="">None</option>{pkg_opts}</select>
+    <label>Address</label><input type="text" name="address" value="{b["address"]}" required>
+    <label>MAC Address</label><input type="text" name="mac" value="{b["mac_address"]}" required>
+    <label>Expires At</label><input type="datetime-local" name="expires_at" value="{b["expires_at"] if b["expires_at"] else ""}">
+    <button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>''', get_pending_count(), admin=True)
+
+@app.route('/ip-bindings/delete/<int:bid>')
+@login_required
+def delete_ip_binding(bid): db = get_db(); db.execute("DELETE FROM ip_bindings WHERE id=? AND provider_id=?",(bid,session['provider_id'])); db.commit(); return redirect('/ip-bindings')
 
 # ------------------------------------------------------------
 # TICKETS
@@ -1007,12 +871,12 @@ def tickets():
 @app.route('/tickets/add', methods=['GET','POST'])
 @login_required
 def add_ticket():
-    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO tickets (provider_id,subject,description,priority) VALUES (?,?,?,?)",(session['provider_id'],request.form['subject'],request.form['description'],request.form['priority'])); db.commit(); return redirect('/tickets')
+    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO tickets (provider_id,subject,description,priority,status) VALUES (?,?,?,?,?)",(session['provider_id'],request.form['subject'],request.form['description'],request.form['priority'],request.form['status'])); db.commit(); return redirect('/tickets')
     return render_page("Raise Ticket",'''<div class="card"><div class="card-header">Raise Ticket</div>
-    <form method="POST"><label>Subject*</label><input type="text" name="subject" required>
+    <form method="POST"><label>Client*</label><input type="text" name="client" required><label>Subject*</label><input type="text" name="subject" required>
+    <label>Status</label><select name="status"><option value="open">Open</option><option value="closed">Closed</option></select>
     <label>Priority</label><select name="priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
-    <label>Description*</label><textarea name="description" required></textarea>
-    <button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(), admin=True)
+    <label>Description*</label><textarea name="description" required></textarea><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(), admin=True)
 
 @app.route('/tickets/edit/<int:tid>', methods=['GET','POST'])
 @login_required
@@ -1108,37 +972,44 @@ def payments():
     daily = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at)=?",(pid,today)).fetchone()['t']
     weekly = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ?",(pid,(date.today()-timedelta(days=7)).isoformat())).fetchone()['t']
     monthly = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ?",(pid,date.today().replace(day=1).isoformat())).fetchone()['t']
-    items = db.execute("SELECT vr.*, COALESCE(sub.username, vr.phone_number) as user_name FROM voucher_requests vr LEFT JOIN subscribers sub ON sub.phone=vr.phone_number WHERE vr.provider_id=? ORDER BY vr.created_at DESC LIMIT 20",(pid,)).fetchall()
+    items = db.execute("SELECT vr.*, COALESCE(sub.username, vr.phone_number) as user_name FROM voucher_requests vr LEFT JOIN subscribers sub ON sub.phone=vr.phone_number WHERE vr.provider_id=? ORDER BY vr.created_at DESC LIMIT 50",(pid,)).fetchall()
     rows = ''
     for i in items:
         checked = "Yes" if i['status'] == 'approved' else "No"
-        rows += f'<tr><td>{i["user_name"]}</td><td>{i["phone_number"]}</td><td>{i["transaction_id"]}</td><td>UGX {i["amount"] or 0:,}</td><td>{checked}</td><td>{i["created_at"][:16] if i["created_at"] else ""}</td></tr>'
-    if not rows: rows = '<tr><td colspan="6">No payments yet.</td></tr>'
+        rows += f'<tr><td>{i["user_name"]}</td><td>{i["phone_number"]}</td><td>{i["transaction_id"]}</td><td>UGX {i["amount"] or 0:,}</td><td>{checked}</td><td>{i["created_at"][:16] if i["created_at"] else ""}</td>'
+        if i['status'] == 'pending': rows += f'<td><a href="/approve/{i["id"]}" class="btn btn-small btn-success">Approve</a> <a href="/reject/{i["id"]}" class="btn btn-small btn-danger">Reject</a></td>'
+        else: rows += '<td>-</td>'
+        rows += '</tr>'
+    if not rows: rows = '<tr><td colspan="7">No payments yet.</td></tr>'
     content = f'''<div class="stat-grid"><div class="stat-card"><h3>UGX {daily or 0:,}</h3><small>Daily Earnings</small></div><div class="stat-card"><h3>UGX {weekly or 0:,}</h3><small>Weekly Earnings</small></div><div class="stat-card"><h3>UGX {monthly or 0:,}</h3><small>Monthly Earnings</small></div></div>
-    <div class="card"><div class="card-header">Payments <a href="/pending" class="btn btn-success btn-small">Record Payment</a></div>
-    <table><thead><tr><th>User</th><th>Phone</th><th>Receipt No.</th><th>Amount</th><th>Checked</th><th>Paid At</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    <div class="card"><div class="card-header">Payments <a href="/record-payment" class="btn btn-success btn-small">Record Payment</a></div>
+    <div class="tabs"><a href="/payments?filter=all" class="tab active">All</a><a href="/payments?filter=checked" class="tab">Checked</a><a href="/payments?filter=unchecked" class="tab">Unchecked</a></div>
+    <table><thead><tr><th>User</th><th>Phone</th><th>Receipt No.</th><th>Amount</th><th>Checked</th><th>Paid At</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
     return render_page("Payments", content, get_pending_count(), admin=True)
 
-@app.route('/pending')
+@app.route('/record-payment', methods=['GET','POST'])
 @login_required
-def pending():
-    pid = session['provider_id']; db = get_db()
-    items = db.execute("SELECT vr.id, vr.phone_number, pl.name as pn, vr.amount, vr.transaction_id, vr.created_at FROM voucher_requests vr JOIN plans pl ON vr.plan_id=pl.id WHERE vr.provider_id=? AND vr.status='pending' ORDER BY vr.created_at DESC",(pid,)).fetchall()
-    rows = ''.join(f'<tr><td>{i["phone_number"]}</td><td>{i["pn"]}</td><td>UGX {i["amount"] or 0:,}</td><td>{i["transaction_id"]}</td><td>No</td><td>{str(i["created_at"])[:16] if i["created_at"] else ""}</td><td><a href="/approve/{i["id"]}" class="btn btn-small btn-success">Approve</a> <a href="/reject/{i["id"]}" class="btn btn-small btn-danger">Reject</a></td></tr>' for i in items) or '<tr><td colspan="7">No unchecked payments.</td></tr>'
-    return render_page("Pending",f'<div class="card"><div class="card-header">Unchecked Payments</div><table><thead><tr><th>User</th><th>Plan</th><th>Amount</th><th>Receipt No.</th><th>Checked</th><th>Paid At</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>', len(items), admin=True)
+def record_payment():
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO voucher_requests (provider_id,phone_number,plan_id,raw_sms,transaction_id,amount,recipient,payment_date,status) VALUES (?,'manual',1,'manual',?,?,'manual',date('now'),'approved')",
+                   (session['provider_id'], request.form['receipt'], float(request.form['amount']))); db.commit()
+        return redirect('/payments')
+    return render_page("Record Payment",'''<div class="card"><div class="card-header">Record Payment</div>
+    <form method="POST"><label>Receipt Number*</label><input type="text" name="receipt" required><label>Amount (UGX)*</label><input type="number" name="amount" step="0.01" required><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(), admin=True)
 
 @app.route('/approve/<int:rid>')
 @login_required
 def approve(rid):
     pid = session['provider_id']; db = get_db(); r = db.execute("SELECT phone_number,plan_id FROM voucher_requests WHERE id=? AND provider_id=?",(rid,pid)).fetchone()
     if r: code = generate_voucher_code(); db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number) VALUES (?,?,?,'sms',?)",(pid,code,r['plan_id'],r['phone_number'])); db.execute("UPDATE voucher_requests SET status='approved',voucher_code=? WHERE id=?",(code,rid)); db.commit()
-    return redirect('/pending')
+    return redirect('/payments')
 
 @app.route('/reject/<int:rid>')
 @login_required
 def reject(rid):
     pid = session['provider_id']; db = get_db(); db.execute("UPDATE voucher_requests SET status='rejected' WHERE id=? AND provider_id=?",(rid,pid)); db.commit()
-    return redirect('/pending')
+    return redirect('/payments')
 
 # ------------------------------------------------------------
 # VOUCHERS
@@ -1147,36 +1018,37 @@ def reject(rid):
 @login_required
 def vouchers_list():
     db = get_db()
-    vouchers = db.execute("SELECT v.code, p.name as pn, v.batch_id, v.phone_number, v.used_at, v.created_at FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? ORDER BY v.id DESC LIMIT 100",(session['provider_id'],)).fetchall()
-    rows = ''.join(f'<tr><td>{v["code"]}</td><td>{v["pn"]}</td><td>{v["batch_id"] or "-"}</td><td>{v["phone_number"] or "-"}</td><td>{v["used_at"] or "-"}</td><td>Never</td></tr>' for v in vouchers) or '<tr><td colspan="6">No vouchers generated yet.</td></tr>'
+    filter_type = request.args.get('filter', 'all')
+    query = "SELECT v.code, p.name as pn, v.batch_id, v.phone_number, v.used_at, v.created_at, v.used FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? "
+    params = [session['provider_id']]
+    if filter_type == 'used': query += " AND v.used=1"
+    elif filter_type == 'unused': query += " AND v.used=0"
+    query += " ORDER BY v.id DESC LIMIT 100"
+    vouchers = db.execute(query, params).fetchall()
+    rows = ''.join(f'<tr><td>{v["code"]}</td><td>{v["pn"]}</td><td>{v["batch_id"] or "-"}</td><td>{v["phone_number"] or "-"}</td><td>{v["used_at"] or "-"}</td><td>Never</td></tr>' for v in vouchers) or '<tr><td colspan="6">No vouchers found.</td></tr>'
     content = f'''<div class="card"><div class="card-header">Vouchers <a href="/vouchers/bulk" class="btn btn-success btn-small">Create Voucher</a></div>
+    <div class="tabs">
+        <a href="/vouchers?filter=all" class="tab {'active' if filter_type=='all' else ''}">All</a>
+        <a href="/vouchers?filter=unused" class="tab {'active' if filter_type=='unused' else ''}">Unused</a>
+        <a href="/vouchers?filter=used" class="tab {'active' if filter_type=='used' else ''}">Used</a>
+    </div>
     <table><thead><tr><th>Voucher Code</th><th>Package</th><th>Batch</th><th>Used By</th><th>Used At</th><th>Unused Expiry</th></tr></thead><tbody>{rows}</tbody></table></div>'''
     return render_page("Vouchers", content, get_pending_count(), admin=True)
-
-@app.route('/generate-cash', methods=['GET','POST'])
-@login_required
-def generate_cash():
-    pid = session['provider_id']; pc = get_pending_count()
-    if request.method == 'POST':
-        plan_id = int(request.form['plan_id']); code = generate_voucher_code()
-        db = get_db(); db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number) VALUES (?,?,?,'cash',?)",(pid,code,plan_id,request.form.get('phone','').strip())); db.commit()
-        content = f'<div class="card"><div class="alert alert-success">Cash voucher generated!</div><p><strong>Voucher Code:</strong></p><div class="voucher-code">{code}</div><p>Give this code to the customer.</p><a href="/generate-cash" class="btn">Generate Another</a> <a href="/dashboard" class="btn btn-outline">Dashboard</a></div>'
-        return render_page("Voucher Generated", content, pc, admin=True)
-    content = f'<div class="card"><div class="card-header">Generate Cash Voucher</div><form method="POST"><label>Select Plan</label><select name="plan_id" required>{get_plan_options(pid, public_only=False)}</select><label>Customer Phone (optional)</label><input type="tel" name="phone"><button type="submit" class="btn" style="margin-top:20px;width:100%;">Generate</button></form></div>'
-    return render_page("Generate Cash Voucher", content, pc, admin=True)
 
 @app.route('/vouchers/bulk', methods=['GET','POST'])
 @login_required
 def vouchers_bulk():
     if request.method == 'POST':
-        plan_id = int(request.form['plan_id']); count = int(request.form['count']); prefix = request.form.get('prefix','').strip().upper(); length = int(request.form['length']); batch_id = f"BATCH-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        plan_id = int(request.form['plan_id']); count = int(request.form['count']); prefix = request.form.get('prefix','').strip().upper(); length = int(request.form['length']); expiry_days = request.form.get('expiry_days')
+        batch_id = f"BATCH-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         db = get_db(); codes = []
+        expiry_date = (date.today() + timedelta(days=int(expiry_days))).isoformat() if expiry_days else None
         for _ in range(count):
             if length > 0: code = prefix + ''.join(random.choices(string.ascii_uppercase+string.digits, k=length))
             else: code = generate_voucher_code()
             while db.execute("SELECT COUNT(*) as cnt FROM vouchers WHERE code=?",(code,)).fetchone()['cnt'] > 0:
                 code = prefix + ''.join(random.choices(string.ascii_uppercase+string.digits, k=length)) if length > 0 else generate_voucher_code()
-            db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, batch_id) VALUES (?,?,?,'bulk',?)",(session['provider_id'], code, plan_id, batch_id)); codes.append(code)
+            db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, batch_id, expiry_date) VALUES (?,?,?,'bulk',?,?)",(session['provider_id'], code, plan_id, batch_id, expiry_date)); codes.append(code)
         db.commit()
         content = f'<div class="card"><div class="alert alert-success">{count} vouchers generated!</div><p><strong>Batch ID:</strong> {batch_id}</p><div class="voucher-code" style="font-size:1rem;max-height:300px;overflow-y:auto;color:#fff;">{"<br>".join(codes)}</div><a href="/vouchers" class="btn">Back to Vouchers</a></div>'
         return render_page("Bulk Vouchers", content, get_pending_count(), admin=True)
@@ -1185,6 +1057,7 @@ def vouchers_bulk():
     <label>Number of Vouchers*</label><input type="number" name="count" value="10" min="1" required>
     <label>Voucher Prefix*</label><input type="text" name="prefix" placeholder="e.g. ROCK" maxlength="2">
     <label>Voucher Code Length* (6-12)</label><input type="number" name="length" value="8" min="6" max="12">
+    <label>Unused Voucher Expiry (days, optional)</label><input type="number" name="expiry_days" placeholder="Leave empty for no expiry">
     <button type="submit" class="btn" style="margin-top:20px;">Generate</button></form></div>'''
     return render_page("Generate Vouchers", content, get_pending_count(), admin=True)
 
@@ -1320,7 +1193,7 @@ def delete_campaign(cid): db = get_db(); db.execute("DELETE FROM campaigns WHERE
 @login_required
 def mikrotik():
     db = get_db(); routers = db.execute("SELECT * FROM mikrotik_routers WHERE provider_id=? ORDER BY id DESC",(session['provider_id'],)).fetchall()
-    rows = ''.join(f'<tr><td>{r["name"]}</td><td>{r["ip_address"] or ""}</td><td>{"Online" if r["is_active"] else "Offline"}</td><td>-</td><td>{"Active" if r["is_active"] else "Inactive"}</td><td><a href="/mikrotik/edit/{r["id"]}" class="btn btn-small">Edit</a> <a href="/mikrotik/delete/{r["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for r in routers) or '<tr><td colspan="6">No Nas devices. Add your first Nas device by clicking the button above.</td></tr>'
+    rows = ''.join(f'<tr><td>{r["name"]}</td><td>{r["ip_address"] or ""}</td><td>{"Online" if r["is_active"] else "Offline"}</td><td>-</td><td>{"Active" if r["is_active"] else "Inactive"}</td><td><a href="/mikrotik/edit/{r["id"]}" class="btn btn-small">Edit</a> <a href="/mikrotik/delete/{r["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for r in routers) or '<tr><td colspan="6">No Nas devices.</td></tr>'
     content = f'''<div class="card"><div class="card-header">MikroTik Routers <a href="/mikrotik/add" class="btn btn-success btn-small">Link a MikroTik</a></div>
     <table><thead><tr><th>Board Name</th><th>Provisioning</th><th>CPU</th><th>Memory</th><th>Status</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
     return render_page("MikroTik", content, get_pending_count(), admin=True)
@@ -1412,7 +1285,6 @@ def edit_provider():
     <button type="submit" class="btn" style="margin-top:20px;">Save Settings</button></form></div>'''
     return render_page("Settings", content, get_pending_count(), admin=True)
 
-# ------------------------------------------------------------
 @app.route('/toggle-auto')
 @login_required
 def toggle_auto():
