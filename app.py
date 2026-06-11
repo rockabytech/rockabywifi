@@ -564,7 +564,7 @@ def api_payments():
         months = [today.replace(month=m,day=1) for m in range(1,today.month+1)]
         rows = db.execute("SELECT strftime('%m',created_at) as m, COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ? GROUP BY m",(session['provider_id'],today.replace(month=1,day=1).isoformat())).fetchall()
         labels = [d.strftime('%b') for d in months]; values = [0]*len(months)
-        for         for r in rows:
+        for r in rows:
             idx = int(r['m'])-1
             if idx < len(values):
                 values[idx] = r['t']
@@ -573,7 +573,7 @@ def api_payments():
         months = [today.replace(year=today.year-1,month=m,day=1) for m in range(1,13)]
         rows = db.execute("SELECT strftime('%m',created_at) as m, COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) BETWEEN ? AND ?",(session['provider_id'],today.replace(year=today.year-1,month=1,day=1).isoformat(),today.replace(year=today.year-1,month=12,day=31).isoformat())).fetchall()
         labels = [d.strftime('%b') for d in months]; values = [0]*12
-        for         for r in rows:
+        for r in rows:
             idx = int(r['m'])-1
             if idx < 12:
                 values[idx] = r['t']
