@@ -101,8 +101,86 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Helpers (identical to previous complete version – get_db, close_db, login_required, parse_sms, generate_voucher_code, get_plan_options, get_pending_count, get_auto_approve, get_provider, clean_number, allowed_file, get_weekly_platform_revenue, format_data, seed_sample_data, yo_charge)
-# [Include all helpers here exactly as in the last working version]
+def get_db():
+    if 'db' not in g:
+        g.db = sqlite3.connect('rockabywifi.db')
+        g.db.row_factory = sqlite3.Row
+        g.db.execute("PRAGMA busy_timeout = 5000;")
+    return g.db
+
+@app.teardown_appcontext
+def close_db(exception):
+    db = g.pop('db', None)
+    if db is not None: db.close()
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'provider_id' not in session and 'subscriber_id' not in session: return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
+
+def parse_mtn_sms(sms):
+    tid=re.search(r'ID:\s*(\d+)',sms); amount=re.search(r'UGX\s*([\d,]+)',sms); recipient_name=re.search(r'to\s+(.+?),',sms); number_match=re.search(r'to\s+.+?[, ]+(\d{10,12})',sms); date_str=re.search(r'on\s+(\d{4}-\d{2}-\d{2})',sms)
+    return {'tid':tid.group(1) if tid else None,'amount':int(amount.group(1).replace(',','')) if amount else None,'recipient_name':recipient_name.group(1).strip() if recipient_name else None,'recipient_number':number_match.group(1) if number_match else None,'date':date_str.group(1) if date_str else None}
+
+def parse_airtel_sms(sms):
+    tid=re.search(r'TID\s*(\d+)',sms); amount=re.search(r'UGX\s*([\d,]+)',sms); recipient_match=re.search(r'to\s+(.+?)\s+on\s+(\d+)',sms,re.IGNORECASE)
+    if recipient_match: recipient_name=recipient_match.group(1).strip(); recipient_number=recipient_match.group(2).strip()
+    else: recipient_match=re.search(r'to\s+(.+?)\s+\d',sms); recipient_name=recipient_match.group(1).strip() if recipient_match else None; recipient_number=None
+    date_str=re.search(r'Date\s+(\d{2}-[A-Za-z]+-\d{4}\s+\d{2}:\d{2})',sms)
+    return {'tid':tid.group(1) if tid else None,'amount':int(amount.group(1).replace(',','')) if amount else None,'recipient_name':recipient_name,'recipient_number':recipient_number,'date':date_str.group(1) if date_str else None}
+
+def generate_voucher_code():
+    return 'WIFI-'+''.join(random.choices(string.ascii_uppercase+string.digits,k=4))+'-'+''.join(random.choices(string.ascii_uppercase+string.digits,k=4))+'-'+''.join(random.choices(string.ascii_uppercase+string.digits,k=4))
+
+def get_plan_options(pid, public_only=True):
+    db=get_db()
+    if public_only:
+        plans=db.execute("SELECT id,name,duration_minutes,price_ugx FROM plans WHERE provider_id=? AND is_active=1 AND is_public=1",(pid,)).fetchall()
+    else:
+        plans=db.execute("SELECT id,name,duration_minutes,price_ugx FROM plans WHERE provider_id=? AND is_active=1",(pid,)).fetchall()
+    return ''.join(f'<option value="{p["id"]}">{p["name"]} – {p["duration_minutes"]} min – UGX {p["price_ugx"]:,}</option>' for p in plans)
+
+def get_pending_count():
+    db=get_db(); row=db.execute("SELECT COUNT(*) as cnt FROM voucher_requests WHERE provider_id=1 AND status='pending'").fetchone()
+    return row['cnt'] if row else 0
+
+def get_auto_approve():
+    db=get_db(); row=db.execute("SELECT auto_approve FROM providers WHERE id=1").fetchone()
+    return row['auto_approve'] if row else 1
+
+def get_provider(pid):
+    db=get_db(); return db.execute("SELECT * FROM providers WHERE id=?",(pid,)).fetchone()
+
+def clean_number(num):
+    d=''.join(filter(str.isdigit,num))
+    if d.startswith('0'): d='256'+d[1:]
+    elif not d.startswith('256'): d='256'+d
+    return d
+
+def allowed_file(fn): return '.' in fn and fn.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
+
+def get_weekly_platform_revenue():
+    db=get_db(); today=date.today(); start=today if today.weekday()==6 else today-timedelta(days=today.weekday()+1); end=start+timedelta(days=6)
+    row=db.execute("SELECT COALESCE(SUM(pl.price_ugx),0) as total FROM vouchers v JOIN plans pl ON v.plan_id=pl.id WHERE v.provider_id=1 AND date(v.created_at) BETWEEN ? AND ?",(start.isoformat(),end.isoformat())).fetchone()
+    return int(row['total']*0.05), start, end
+
+def format_data(size_mb):
+    return f"{size_mb/1000:.2f} GB" if size_mb>=1000 else f"{size_mb:.2f} MB"
+
+def seed_sample_data():
+    db=get_db()
+    if db.execute("SELECT COUNT(*) as c FROM data_sessions WHERE provider_id=1").fetchone()['c']>0: return
+    today=date.today(); plans=db.execute("SELECT id,price_ugx FROM plans WHERE provider_id=1 AND is_active=1 AND is_public=1").fetchall(); phones=['0771234567','0772345678','0773456789','0751111111','0752222222']
+    for i in range(60):
+        d=today-timedelta(days=i)
+        for _ in range(random.randint(1,5)): db.execute("INSERT INTO data_sessions (provider_id,phone_number,session_date,data_download,data_upload) VALUES (1,?,?,?,?)",(random.choice(phones),d.isoformat(),round(random.uniform(10,1500),2),round(random.uniform(2,500),2)))
+        db.execute("INSERT INTO sms_log (provider_id,phone_number,message) VALUES (1,?,?)",(random.choice(phones),"Payment SMS "+str(i)))
+        db.execute("INSERT INTO user_activity (provider_id,phone_number,action) VALUES (1,?,?)",(random.choice(phones),random.choice(['login','logout','voucher_purchased'])))
+        plan=random.choice(plans); db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used) VALUES (1,?,?,'sms',?,?)",(generate_voucher_code(),plan['id'],random.choice(phones),1 if random.random()>0.3 else 0))
+    db.commit()
+
 base_template = """
 <!DOCTYPE html>
 <html lang="en">
