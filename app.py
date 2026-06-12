@@ -373,16 +373,31 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False):
 # ------------------------------------------------------------
 @app.route('/')
 def home():
-    p = get_provider(1); bn = p['business_name'] if p else 'RockabyWiFi'
+    # Get provider ID from URL, default to 1
+    pid = request.args.get('pid', 1, type=int)
+    p = get_provider(pid)
+    if not p:
+        return "Provider not found.", 404
+    bn = p['business_name'] if p else 'RockabyWiFi'
     logo = f'<img src="/static/uploads/{p["logo_image"]}" class="provider-logo" alt="{bn}">' if p and p['logo_image'] else ''
     poster = f'<img src="/static/uploads/{p["poster_image"]}" class="provider-poster" alt="Poster">' if p and p['poster_image'] else ''
     content = f'''<div class="card" style="display:flex;align-items:center;">{logo}<h2 style="margin:0;">{bn}</h2></div>{poster}
     <div class="card"><div class="card-header">Choose a Plan</div>
-    <form method="GET" action="/sms-verify"><label>Your Phone Number *</label><input type="tel" name="phone" required><label>Select Plan</label><select name="plan_id" required>{get_plan_options(1)}</select><button type="submit" class="btn" style="margin-top:20px;width:100%;">Continue to Payment</button></form></div>
-    <p style="text-align:center;margin-top:15px;"><a href="/redeem" class="btn btn-outline">Already have a voucher?</a> <a href="/subscriber-login" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a></p>
-    <p style="text-align:center;margin-top:10px;"><a href="/free-trial" class="btn btn-outline" style="background:#28a745;color:white;border-color:#28a745;">🎁 Free 5-Minute Trial</a></p>'''
-    return render_page("Get Internet Access", content, get_pending_count())
-
+    <form method="GET" action="/sms-verify">
+        <input type="hidden" name="pid" value="{pid}">
+        <label>Your Phone Number *</label><input type="tel" name="phone" required>
+        <label>Select Plan</label><select name="plan_id" required>{get_plan_options(pid)}</select>
+        <button type="submit" class="btn" style="margin-top:20px;width:100%;">Continue to Payment</button>
+    </form></div>
+    <p style="text-align:center;margin-top:15px;">
+        <a href="/redeem?pid={pid}" class="btn btn-outline">Already have a voucher?</a>
+        <a href="/subscriber-login?pid={pid}" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a>
+    </p>
+    <p style="text-align:center;margin-top:10px;">
+        <a href="/free-trial?pid={pid}" class="btn btn-outline" style="background:#28a745;color:white;border-color:#28a745;">🎁 Free 5-Minute Trial</a>
+    </p>'''
+    return render_page("Get Internet Access", content, get_pending_count(), pid, admin=False)
+    
 @app.route('/free-trial')
 def free_trial():
     ip = request.remote_addr; db = get_db()
@@ -407,10 +422,11 @@ def redeem():
 
 @app.route('/sms-verify', methods=['GET','POST'])
 def sms_verify():
+    pid = request.args.get('pid', 1, type=int)
     phone = request.args.get('phone',''); plan_id = request.args.get('plan_id','1'); pc = get_pending_count()
     db = get_db(); plan = db.execute("SELECT * FROM plans WHERE id=?",(plan_id,)).fetchone()
     if not plan: return "Invalid plan selected.", 400
-    prov = db.execute("SELECT auto_approve, mtn_number, airtel_number FROM providers WHERE id=1").fetchone()
+    prov = db.execute("SELECT auto_approve, mtn_number, airtel_number FROM providers WHERE id=?",(pid,)).fetchone()
     if request.method == 'POST':
         phone = request.form['phone'].strip(); plan_id = int(request.form['plan_id']); raw = request.form['raw_sms'].strip()
         parsed = parse_airtel_sms(raw) if 'TID' in raw or 'SENT.TID' in raw else parse_mtn_sms(raw)
@@ -433,11 +449,11 @@ def sms_verify():
         rf = f"{parsed.get('recipient_name','')} {parsed.get('recipient_number','')}".strip()
         if status == 'approved':
             vc = generate_voucher_code()
-            db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (1,?,?,'sms',?)",(vc,plan_id,phone))
-            db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status, voucher_code) VALUES (1,?,?,?,?,?,?,?,'approved',?)",(phone,plan_id,raw,parsed['tid'],parsed['amount'],rf,parsed['date'],vc)); db.commit()
+            db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (?,?,?,'sms',?)",(pid, vc, plan_id, phone))
+            db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status, voucher_code) VALUES (?,?,?,?,?,?,?,?,'approved',?)",(pid, phone, plan_id, raw, parsed['tid'], parsed['amount'], rf, parsed['date'], vc))
             content = f'<div class="card"><div class="alert alert-success">Payment verified!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{vc}</div><button class="copy-btn" onclick="navigator.clipboard.writeText(\'{vc}\')">📋 Copy</button><p style="margin-top:10px;">Use this code on the <a href="/redeem">Redeem page</a> to connect.</p><a href="/" class="btn">Back to Home</a></div>'
         else:
-            db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status) VALUES (1,?,?,?,?,?,?,?,'pending')",(phone,plan_id,raw,parsed['tid'],parsed['amount'],rf,parsed['date'])); db.commit()
+            db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status) VALUES (?,?,?,?,?,?,?,?,'pending')",(pid, phone, plan_id, raw, parsed['tid'], parsed['amount'], rf, parsed['date']))
             content = '<div class="card"><div class="alert alert-success">Payment submitted! Waiting for approval.</div><p><a href="/" class="btn">Back to Home</a></p></div>'
         return render_page("Verification Result", content, get_pending_count())
 
