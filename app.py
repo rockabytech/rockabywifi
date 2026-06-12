@@ -1313,6 +1313,97 @@ def stats():
     return render_page("Statistics", content, get_pending_count(), admin=True)
 
 # ------------------------------------------------------------
+# ------------------------------------------------------------
+# SUPER ADMIN
+# ------------------------------------------------------------
+SUPER_ADMIN_PASSWORD = 'rockabytech2025'  # Change this!
+
+@app.route('/admin', methods=['GET','POST'])
+def super_admin_login():
+    if request.method == 'POST':
+        if request.form.get('password') == SUPER_ADMIN_PASSWORD:
+            session['super_admin'] = True
+            return redirect('/admin/dashboard')
+        return render_page("Super Admin Login",'<div class="card"><div class="alert alert-error">Invalid password.</div><p><a href="/admin">Try again</a></p></div>',0,admin=False)
+    return render_page("Super Admin Login",'<div class="card"><div class="card-header">RockabyTech Super Admin</div><form method="POST"><label>Password</label><input type="password" name="password" required><button type="submit" class="btn" style="margin-top:20px;width:100%;">Login</button></form></div>',0,admin=False)
+
+@app.route('/admin/dashboard')
+def super_admin_dashboard():
+    if not session.get('super_admin'): return redirect('/admin')
+    db = get_db()
+    providers = db.execute("SELECT * FROM providers ORDER BY id").fetchall()
+    rows = ''
+    for p in providers:
+        # Calculate their revenue
+        rev = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved'",(p['id'],)).fetchone()['t']
+        # Calculate RockabyTech's 5% fee
+        fee = int(rev * 0.05)
+        rows += f'''<tr>
+            <td>{p['id']}</td>
+            <td>{p['business_name']}</td>
+            <td>{p['contact']}</td>
+            <td>{'Active' if p['is_active'] else 'Suspended'}</td>
+            <td>UGX {rev or 0:,}</td>
+            <td>UGX {fee:,}</td>
+            <td>{p['subscription_expiry'] if p['subscription_expiry'] else '-'}</td>
+            <td>
+                <a href="/admin/impersonate/{p['id']}" class="btn btn-small">Impersonate</a>
+                <a href="/admin/toggle-provider/{p['id']}" class="btn btn-small btn-danger">{'Suspend' if p['is_active'] else 'Activate'}</a>
+            </td>
+        </tr>'''
+    content = f'''<div class="card"><div class="card-header">Provider Management <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a></div>
+    <table><thead><tr><th>ID</th><th>Business Name</th><th>Contact</th><th>Status</th><th>Revenue</th><th>RockabyTech Fee (5%)</th><th>Expiry</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table>
+    <p style="margin-top:20px;"><a href="/admin/logout" class="btn btn-outline">Logout</a></p></div>'''
+    return render_page("Super Admin", content, 0, admin=False)
+
+@app.route('/admin/add-provider', methods=['GET','POST'])
+def add_provider():
+    if not session.get('super_admin'): return redirect('/admin')
+    if request.method == 'POST':
+        db = get_db()
+        hashed = generate_password_hash(request.form['password'])
+        db.execute("INSERT INTO providers (business_name,contact,password_hash,subscription_expiry,is_active,mtn_number,airtel_number,support_phone) VALUES (?,?,?,?,1,?,?,?)",
+                   (request.form['business_name'], request.form['contact'], hashed, request.form['expiry'], request.form['mtn'], request.form['airtel'], request.form['support']))
+        db.commit()
+        return redirect('/admin/dashboard')
+    return render_page("Add Provider",'''<div class="card"><div class="card-header">Add New Provider</div>
+    <form method="POST">
+    <label>Business Name*</label><input type="text" name="business_name" required>
+    <label>Contact Phone*</label><input type="tel" name="contact" required>
+    <label>Login Password*</label><input type="password" name="password" required>
+    <label>Subscription Expiry*</label><input type="date" name="expiry" required>
+    <label>MTN Number</label><input type="text" name="mtn">
+    <label>Airtel Number</label><input type="text" name="airtel">
+    <label>Support WhatsApp</label><input type="text" name="support">
+    <button type="submit" class="btn" style="margin-top:20px;">Create Provider</button></form></div>''', 0, admin=False)
+
+@app.route('/admin/impersonate/<int:pid>')
+def impersonate(pid):
+    if not session.get('super_admin'): return redirect('/admin')
+    db = get_db()
+    prov = db.execute("SELECT * FROM providers WHERE id=?",(pid,)).fetchone()
+    if prov:
+        session['provider_id'] = prov['id']
+        session['provider_name'] = prov['business_name']
+        return redirect('/dashboard')
+    return redirect('/admin/dashboard')
+
+@app.route('/admin/toggle-provider/<int:pid>')
+def toggle_provider(pid):
+    if not session.get('super_admin'): return redirect('/admin')
+    db = get_db()
+    prov = db.execute("SELECT is_active FROM providers WHERE id=?",(pid,)).fetchone()
+    if prov:
+        new_status = 0 if prov['is_active'] else 1
+        db.execute("UPDATE providers SET is_active=? WHERE id=?",(new_status, pid))
+        db.commit()
+    return redirect('/admin/dashboard')
+
+@app.route('/admin/logout')
+def super_admin_logout():
+    session.pop('super_admin', None)
+    return redirect('/admin')
+
 init_db()
 if __name__ == '__main__':
     app.run()
