@@ -1329,7 +1329,6 @@ def stats():
     return render_page("Statistics", content, get_pending_count(), admin=True)
 
 # ------------------------------------------------------------
-# ------------------------------------------------------------
 # SUPER ADMIN
 # ------------------------------------------------------------
 SUPER_ADMIN_PASSWORD = 'rockabytech2025'  # Change this!
@@ -1341,36 +1340,87 @@ def super_admin_login():
             session['super_admin'] = True
             return redirect('/admin/dashboard')
         return render_page("Super Admin Login",'<div class="card"><div class="alert alert-error">Invalid password.</div><p><a href="/admin">Try again</a></p></div>',0,admin=False)
-    return render_page("Super Admin Login",'<div class="card"><div class="card-header">RockabyTech Super Admin</div><form method="POST"><label>Password</label><input type="password" name="password" required><button type="submit" class="btn" style="margin-top:20px;width:100%;">Login</button></form></div>',0,admin=False)
+    return render_page("Super Admin Login",'<div class="card"><div class="card-header">🔐 RockabyTech Super Admin</div><form method="POST"><label>Password</label><input type="password" name="password" required><button type="submit" class="btn" style="margin-top:20px;width:100%;">Login</button></form></div>',0,admin=False)
 
 @app.route('/admin/dashboard')
 def super_admin_dashboard():
     if not session.get('super_admin'): return redirect('/admin')
     db = get_db()
+    
+    # Overall stats
+    total_providers = db.execute("SELECT COUNT(*) as c FROM providers").fetchone()['c']
+    active_providers = db.execute("SELECT COUNT(*) as c FROM providers WHERE is_active=1").fetchone()['c']
+    total_revenue = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE status='approved'").fetchone()['t']
+    platform_fee = int(total_revenue * 0.05) if total_revenue else 0
+    total_users = db.execute("SELECT COUNT(DISTINCT phone_number) as c FROM vouchers").fetchone()['c']
+    today = date.today().isoformat()
+    today_revenue = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE status='approved' AND date(created_at)=?",(today,)).fetchone()['t']
+    pending_approvals = db.execute("SELECT COUNT(*) as c FROM voucher_requests WHERE status='pending'").fetchone()['c']
+    
+    # Provider list with detailed info
     providers = db.execute("SELECT * FROM providers ORDER BY id").fetchall()
     rows = ''
     for p in providers:
         # Calculate their revenue
-        rev = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved'",(p['id'],)).fetchone()['t']
-        # Calculate RockabyTech's 5% fee
-        fee = int(rev * 0.05)
-        rows += f'''<tr>
+        total = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved'",(p['id'],)).fetchone()['t']
+        this_month = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ?",(p['id'], date.today().replace(day=1).isoformat())).fetchone()['t']
+        fee = int(total * 0.05)
+        monthly_fee = int(this_month * 0.05)
+        voucher_count = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=?",(p['id'],)).fetchone()['c']
+        sub_status = "Active" if p['is_active'] else "Suspended"
+        expiry = p['subscription_expiry'] if p['subscription_expiry'] else '-'
+        expired = False
+        if p['subscription_expiry'] and date.fromisoformat(p['subscription_expiry']) < date.today():
+            sub_status = "Expired"
+            expired = True
+        
+        row_class = ''
+        if expired: row_class = 'style="background:#fff3cd;"'
+        
+        rows += f'''<tr {row_class}>
             <td>{p['id']}</td>
-            <td>{p['business_name']}</td>
+            <td><strong>{p['business_name']}</strong></td>
             <td>{p['contact']}</td>
-            <td>{'Active' if p['is_active'] else 'Suspended'}</td>
-            <td>UGX {rev or 0:,}</td>
+            <td><span class="badge {'badge-success' if sub_status=='Active' else 'badge-danger' if sub_status=='Suspended' else 'badge-warning'}">{sub_status}</span></td>
+            <td>UGX {total or 0:,}</td>
             <td>UGX {fee:,}</td>
-            <td>{p['subscription_expiry'] if p['subscription_expiry'] else '-'}</td>
+            <td>UGX {monthly_fee:,}</td>
+            <td>{voucher_count}</td>
+            <td>{expiry}</td>
             <td>
-                <a href="/admin/impersonate/{p['id']}" class="btn btn-small">Impersonate</a>
-                <a href="/admin/toggle-provider/{p['id']}" class="btn btn-small btn-danger">{'Suspend' if p['is_active'] else 'Activate'}</a>
+                <div class="dropdown">
+                    <button class="btn btn-small">⋮</button>
+                    <div class="dropdown-content">
+                        <a href="/admin/impersonate/{p['id']}"><i class="fas fa-user-secret"></i> Impersonate</a>
+                        <a href="/admin/extend/{p['id']}"><i class="fas fa-calendar-plus"></i> Extend Subscription</a>
+                        <a href="/admin/edit-provider/{p['id']}"><i class="fas fa-edit"></i> Edit Provider</a>
+                        <a href="/admin/toggle-provider/{p['id']}"><i class="fas fa-power-off"></i> {'Suspend' if p['is_active'] else 'Activate'}</a>
+                        <a href="/admin/delete-provider/{p['id']}" onclick="return confirm('Delete this provider permanently?')"><i class="fas fa-trash"></i> Delete</a>
+                    </div>
+                </div>
             </td>
         </tr>'''
-    content = f'''<div class="card"><div class="card-header">Provider Management <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a></div>
-    <table><thead><tr><th>ID</th><th>Business Name</th><th>Contact</th><th>Status</th><th>Revenue</th><th>RockabyTech Fee (5%)</th><th>Expiry</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table>
+    
+    content = f'''<div class="stat-grid">
+        <div class="stat-card"><h3>{total_providers}</h3><small>Total Providers</small></div>
+        <div class="stat-card"><h3>{active_providers}</h3><small>Active Providers</small></div>
+        <div class="stat-card"><h3>UGX {total_revenue or 0:,}</h3><small>Total Revenue (All Time)</small></div>
+        <div class="stat-card"><h3>UGX {platform_fee:,}</h3><small>Your Platform Fee (5%)</small></div>
+        <div class="stat-card"><h3>{total_users}</h3><small>Total End Users</small></div>
+        <div class="stat-card"><h3>{pending_approvals}</h3><small>Pending Approvals</small></div>
+    </div>
+    
+    <div class="card"><div class="card-header">📊 Today's Overview</div>
+    <div style="display:flex;gap:20px;">
+        <div><strong>Today's Revenue:</strong> UGX {today_revenue or 0:,}</div>
+        <div><strong>Today's Platform Fee:</strong> UGX {int(today_revenue * 0.05):,}</div>
+    </div></div>
+    
+    <div class="card"><div class="card-header">Provider Management <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a></div>
+    <table><thead><tr><th>ID</th><th>Business Name</th><th>Contact</th><th>Status</th><th>Total Revenue</th><th>Total Fee</th><th>Fee This Month</th><th>Vouchers</th><th>Expiry</th><th>Actions</th></tr></thead><tbody>{rows}</tbody></table>
     <p style="margin-top:20px;"><a href="/admin/logout" class="btn btn-outline">Logout</a></p></div>'''
-    return render_page("Super Admin", content, 0, admin=False)
+    
+    return render_page("Super Admin Dashboard", content, 0, admin=False)
 
 @app.route('/admin/add-provider', methods=['GET','POST'])
 def add_provider():
@@ -1380,6 +1430,12 @@ def add_provider():
         hashed = generate_password_hash(request.form['password'])
         db.execute("INSERT INTO providers (business_name,contact,password_hash,subscription_expiry,is_active,mtn_number,airtel_number,support_phone) VALUES (?,?,?,?,1,?,?,?)",
                    (request.form['business_name'], request.form['contact'], hashed, request.form['expiry'], request.form['mtn'], request.form['airtel'], request.form['support']))
+        new_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        db.commit()
+        # Create default plans for new provider
+        for name, mins, price in [('1 Hour',60,500),('3 Hours',180,1000),('24 Hours',1440,3000),('Weekly',10080,10000)]:
+            db.execute("INSERT INTO plans (provider_id, name, duration_minutes, price_ugx, is_public) VALUES (?,?,?,?,1)",(new_id, name, mins, price))
+        db.execute("INSERT INTO settings (provider_id, key, value) VALUES (?,'auto_approve','1')",(new_id,))
         db.commit()
         return redirect('/admin/dashboard')
     return render_page("Add Provider",'''<div class="card"><div class="card-header">Add New Provider</div>
@@ -1392,6 +1448,56 @@ def add_provider():
     <label>Airtel Number</label><input type="text" name="airtel">
     <label>Support WhatsApp</label><input type="text" name="support">
     <button type="submit" class="btn" style="margin-top:20px;">Create Provider</button></form></div>''', 0, admin=False)
+
+@app.route('/admin/extend/<int:pid>', methods=['GET','POST'])
+def extend_subscription(pid):
+    if not session.get('super_admin'): return redirect('/admin')
+    db = get_db()
+    prov = db.execute("SELECT * FROM providers WHERE id=?",(pid,)).fetchone()
+    if not prov: return redirect('/admin/dashboard')
+    if request.method == 'POST':
+        new_expiry = request.form['expiry']
+        db.execute("UPDATE providers SET subscription_expiry=?, is_active=1 WHERE id=?",(new_expiry, pid))
+        db.commit()
+        return redirect('/admin/dashboard')
+    current_expiry = prov['subscription_expiry'] if prov['subscription_expiry'] else date.today().isoformat()
+    return render_page("Extend Subscription",f'''<div class="card"><div class="card-header">Extend Subscription: {prov["business_name"]}</div>
+    <p>Current Expiry: <strong>{current_expiry}</strong></p>
+    <form method="POST">
+    <label>New Expiry Date*</label><input type="date" name="expiry" value="{current_expiry}" required>
+    <div style="margin-top:10px;">
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry]').value='{(date.today()+timedelta(days=30)).isoformat()}'">+ 1 Month</button>
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry]').value='{(date.today()+timedelta(days=90)).isoformat()}'">+ 3 Months</button>
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry]').value='{(date.today()+timedelta(days=365)).isoformat()}'">+ 1 Year</button>
+    </div>
+    <button type="submit" class="btn" style="margin-top:20px;">Save</button></form></div>''', 0, admin=False)
+
+@app.route('/admin/edit-provider/<int:pid>', methods=['GET','POST'])
+def edit_provider_admin(pid):
+    if not session.get('super_admin'): return redirect('/admin')
+    db = get_db()
+    prov = db.execute("SELECT * FROM providers WHERE id=?",(pid,)).fetchone()
+    if not prov: return redirect('/admin/dashboard')
+    if request.method == 'POST':
+        db.execute("UPDATE providers SET business_name=?, contact=?, mtn_number=?, airtel_number=?, support_phone=?, percent_fee=?, monthly_fee_ugx=? WHERE id=?",
+                   (request.form['business_name'], request.form['contact'], request.form['mtn'], request.form['airtel'], request.form['support'], float(request.form['percent_fee']), int(request.form['monthly_fee']), pid))
+        # If password is provided, update it
+        if request.form.get('password'):
+            hashed = generate_password_hash(request.form['password'])
+            db.execute("UPDATE providers SET password_hash=? WHERE id=?",(hashed, pid))
+        db.commit()
+        return redirect('/admin/dashboard')
+    return render_page("Edit Provider",f'''<div class="card"><div class="card-header">Edit Provider: {prov["business_name"]}</div>
+    <form method="POST">
+    <label>Business Name*</label><input type="text" name="business_name" value="{prov["business_name"]}" required>
+    <label>Contact Phone*</label><input type="tel" name="contact" value="{prov["contact"] or ""}" required>
+    <label>New Password (leave blank to keep current)</label><input type="password" name="password">
+    <label>MTN Number</label><input type="text" name="mtn" value="{prov["mtn_number"] or ""}">
+    <label>Airtel Number</label><input type="text" name="airtel" value="{prov["airtel_number"] or ""}">
+    <label>Support WhatsApp</label><input type="text" name="support" value="{prov["support_phone"] or ""}">
+    <label>Platform Fee (%)</label><input type="number" name="percent_fee" value="{prov["percent_fee"]}" step="0.1">
+    <label>Monthly Fee (UGX)</label><input type="number" name="monthly_fee" value="{prov["monthly_fee_ugx"]}">
+    <button type="submit" class="btn" style="margin-top:20px;">Save Changes</button></form></div>''', 0, admin=False)
 
 @app.route('/admin/impersonate/<int:pid>')
 def impersonate(pid):
@@ -1413,6 +1519,20 @@ def toggle_provider(pid):
         new_status = 0 if prov['is_active'] else 1
         db.execute("UPDATE providers SET is_active=? WHERE id=?",(new_status, pid))
         db.commit()
+    return redirect('/admin/dashboard')
+
+@app.route('/admin/delete-provider/<int:pid>')
+def delete_provider(pid):
+    if not session.get('super_admin'): return redirect('/admin')
+    if pid == 1: return "Cannot delete the main admin provider.", 403
+    db = get_db()
+    db.execute("DELETE FROM providers WHERE id=?",(pid,))
+    db.execute("DELETE FROM plans WHERE provider_id=?",(pid,))
+    db.execute("DELETE FROM vouchers WHERE provider_id=?",(pid,))
+    db.execute("DELETE FROM voucher_requests WHERE provider_id=?",(pid,))
+    db.execute("DELETE FROM subscribers WHERE provider_id=?",(pid,))
+    db.execute("DELETE FROM settings WHERE provider_id=?",(pid,))
+    db.commit()
     return redirect('/admin/dashboard')
 
 @app.route('/admin/logout')
