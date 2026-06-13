@@ -49,7 +49,7 @@ def mt_remove_user(username):
     except: return False
 
 # ------------------------------------------------------------
-# DATABASE (SQLite – persistent, daily backup)
+# DATABASE
 # ------------------------------------------------------------
 DB_PATH = 'rockabywifi.db'
 
@@ -109,11 +109,8 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS yo_tx (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, tx_ref TEXT UNIQUE, phone TEXT, amount INTEGER, status TEXT DEFAULT 'pending', voucher_code TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     c.execute('''CREATE TABLE IF NOT EXISTS expiry_dates (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, user_id INTEGER NOT NULL, expiry_date TIMESTAMP, grace_period INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id), FOREIGN KEY(user_id) REFERENCES subscribers(id))''')
     c.execute('''CREATE TABLE IF NOT EXISTS ip_bindings (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id INTEGER NOT NULL, mikrotik_id INTEGER, name TEXT NOT NULL, package_id INTEGER, dhcp_lease TEXT, address TEXT NOT NULL, mac_address TEXT NOT NULL, expires_at TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(provider_id) REFERENCES providers(id), FOREIGN KEY(mikrotik_id) REFERENCES mikrotik_routers(id), FOREIGN KEY(package_id) REFERENCES plans(id))''')
-
-    # New table for super admin audit log
     c.execute('''CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, admin_id INTEGER, action TEXT, details TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
 
-    # Default provider + plans
     c.execute("SELECT COUNT(*) FROM providers WHERE id=1")
     if c.fetchone()[0] == 0:
         hashed = generate_password_hash('admin123')
@@ -131,7 +128,6 @@ def init_db():
     conn.close()
 
 def backup_database():
-    """Create a daily backup of the SQLite database."""
     backup_dir = 'backups'
     os.makedirs(backup_dir, exist_ok=True)
     backup_file = os.path.join(backup_dir, f"rockabywifi_backup_{date.today().isoformat()}.db")
@@ -207,9 +203,6 @@ def seed_sample_data():
         plan=random.choice(plans); db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used) VALUES (1,?,?,'sms',?,?)",(generate_voucher_code(),plan['id'],random.choice(phones),1 if random.random()>0.3 else 0))
     db.commit()
 
-# ------------------------------------------------------------
-# YO! PAYMENTS HELPER
-# ------------------------------------------------------------
 def yo_charge(phone, amount, plan_name, provider):
     if not provider['yo_username'] or not provider['yo_password']: return None
     ref = f"ROCK-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(1000,9999)}"
@@ -233,9 +226,6 @@ def yo_charge(phone, amount, plan_name, provider):
     except Exception as e: print(f"Yo! Payments error: {e}")
     return None
 
-# ------------------------------------------------------------
-# BASE TEMPLATE (Glassmorphism + Fancy Charts CSS)
-# ------------------------------------------------------------
 base_template = """
 <!DOCTYPE html>
 <html lang="en">
@@ -248,12 +238,12 @@ base_template = """
     <style>
         :root {
             --primary: #1a73e8; --primary-dark: #1557b0; --accent: #ff6b6b; --accent2: #51cf66; --accent3: #ffd43b;
-            --bg: #f0f4f8; --card-bg: rgba(255,255,255,0.85); --glass-border: rgba(255,255,255,0.3);
+            --bg: #f0f4f8; --card-bg: rgba(255,255,255,0.9); --glass-border: rgba(255,255,255,0.3);
             --text: #1a1a1a; --text-secondary: #666666; --border: #e0e0e0;
             --radius: 16px; --shadow: 0 8px 32px rgba(0,0,0,0.08); --sidebar-width: 260px;
         }
         .dark-mode {
-            --bg: #0f172a; --card-bg: rgba(30,41,59,0.85); --glass-border: rgba(255,255,255,0.08);
+            --bg: #0f172a; --card-bg: rgba(30,41,59,0.9); --glass-border: rgba(255,255,255,0.08);
             --text: #f1f5f9; --text-secondary: #94a3b8; --border: #334155;
         }
         * { margin:0; padding:0; box-sizing:border-box; }
@@ -371,13 +361,14 @@ base_template = """
         .remember-row { display:flex; align-items:center; margin-top:15px; }
         .remember-row input[type="checkbox"] { width:auto; margin-right:8px; }
         .copy-btn { background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-left: 10px; }
-        .dropdown { position:relative; display:inline-block; }
+        .dropdown { position:relative; display:inline-block; z-index:100; }
         .dropdown-content {
-            display:none; position:absolute; background:var(--card-bg); min-width:200px;
-            box-shadow:0 12px 40px rgba(0,0,0,0.2); z-index:1; right:0; border-radius:12px;
+            display:none; position:absolute; right:0; top:100%; background:var(--card-bg);
+            backdrop-filter: blur(20px); min-width:220px;
+            box-shadow:0 12px 40px rgba(0,0,0,0.25); z-index:200; border-radius:12px;
             overflow:hidden; border:1px solid var(--glass-border);
         }
-        .dropdown-content a { color:var(--text); padding:10px 16px; text-decoration:none; display:block; }
+        .dropdown-content a { color:var(--text); padding:12px 18px; text-decoration:none; display:block; }
         .dropdown-content a:hover { background:rgba(26,115,232,0.1); }
         .dropdown:hover .dropdown-content { display:block; }
         footer { text-align:center; padding:24px; color:var(--text-secondary); }
@@ -481,19 +472,9 @@ def home():
     poster = f'<img src="/static/uploads/{p["poster_image"]}" class="provider-poster" alt="Poster">' if p and p['poster_image'] else ''
     content = f'''<div class="card" style="display:flex;align-items:center;">{logo}<h2 style="margin:0;">{bn}</h2></div>{poster}
     <div class="card"><div class="card-header">Choose a Plan</div>
-    <form method="GET" action="/sms-verify">
-        <input type="hidden" name="pid" value="{pid}">
-        <label>Your Phone Number *</label><input type="tel" name="phone" required>
-        <label>Select Plan</label><select name="plan_id" required>{get_plan_options(pid)}</select>
-        <button type="submit" class="btn" style="margin-top:20px;width:100%;">Continue to Payment</button>
-    </form></div>
-    <p style="text-align:center;margin-top:15px;">
-        <a href="/redeem?pid={pid}" class="btn btn-outline">Already have a voucher?</a>
-        <a href="/subscriber-login?pid={pid}" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a>
-    </p>
-    <p style="text-align:center;margin-top:10px;">
-        <a href="/free-trial?pid={pid}" class="btn btn-outline" style="background: linear-gradient(135deg, #28a745, #51cf66); color:white; border:none;">🎁 Free 5-Minute Trial</a>
-    </p>'''
+    <form method="GET" action="/sms-verify"><input type="hidden" name="pid" value="{pid}"><label>Your Phone Number *</label><input type="tel" name="phone" required><label>Select Plan</label><select name="plan_id" required>{get_plan_options(pid)}</select><button type="submit" class="btn" style="margin-top:20px;width:100%;">Continue to Payment</button></form></div>
+    <p style="text-align:center;margin-top:15px;"><a href="/redeem?pid={pid}" class="btn btn-outline">Already have a voucher?</a> <a href="/subscriber-login?pid={pid}" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a></p>
+    <p style="text-align:center;margin-top:10px;"><a href="/free-trial?pid={pid}" class="btn btn-outline" style="background: linear-gradient(135deg, #28a745, #51cf66); color:white; border:none;">🎁 Free 5-Minute Trial</a></p>'''
     return render_page("Get Internet Access", content, get_pending_count(pid), pid, admin=False)
 
 @app.route('/free-trial')
@@ -667,16 +648,11 @@ def dashboard():
     fetch('/api/network').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('netChart').getContext('2d'),{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'Download',data:d.downloads,backgroundColor:'rgba(26,115,232,0.7)',borderRadius:6}},{{label:'Upload',data:d.uploads,backgroundColor:'rgba(255,212,59,0.7)',borderRadius:6}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{tooltip:{{callbacks:{{label:function(c){{return c.dataset.label+': '+(c.raw>=1000?(c.raw/1000).toFixed(2)+' GB':c.raw.toFixed(2)+' MB');}}}}}}}}}}); }});
     fetch('/api/registration').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('regChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'Registrations',data:d.values,borderColor:'#ff6b6b',backgroundColor:'rgba(255,107,107,0.1)',fill:true,tension:0.4,pointRadius:6,pointBackgroundColor:'#ff6b6b'}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}}}}}}); }});
     fetch('/api/most-active').then(r=>r.json()).then(d=>{{ var rows=''; d.forEach(u=>{{ rows+=`<tr><td>${{u.username}}</td><td>${{u.data_usage}}</td><td>${{u.phone}}</td></tr>`; }}); document.getElementById('maTable').innerHTML=rows; }});
-    fetch('/api/package-perf').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('ppChart2'),{{type:'radar',data:{{labels:d.labels,datasets:[{{label:'Sales',data:d.sales,borderColor:'#1a73e8',backgroundColor:'rgba(26,115,232,0.2)'}},{{label:'Revenue',data:d.revenue,borderColor:'#51cf66',backgroundColor:'rgba(81,207,102,0.2)'}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{position:'bottom'}}}}}}}}); }});
     loadPay();
     </script>"""
     return render_page("Dashboard", content, get_pending_count(pid), pid, admin=True)
 
-# API endpoints – same as before, but all use provider_id from session
-# (They are unchanged except for adding provider_id filter where needed)
-# ------------------------------------------------------------
-# API ENDPOINTS
-# ------------------------------------------------------------
+# API endpoints (all use provider_id from session)
 @app.route('/api/payments')
 @login_required
 def api_payments():
@@ -845,14 +821,595 @@ def suspend_subscriber(sid):
     return redirect('/active-users')
 
 # ------------------------------------------------------------
-# ALL OTHER MODULES (Users, Expiry Dates, IP Bindings, Tickets, Leads, Packages, Payments, Vouchers, Invoices, Expenses, Messages, Email, Campaigns, MikroTik, Equipment, Provider Settings)
+# USERS
 # ------------------------------------------------------------
-# [These are identical to the previous Part 4. Due to character limits, I'm including them by reference.
-#  Copy all the module routes from the last complete Part 4 I sent – they work perfectly with the new pid system.
-#  Make sure every route uses session['provider_id'] instead of hardcoded 1.]
+@app.route('/users')
+@login_required
+def users_list():
+    pid = session['provider_id']; db = get_db()
+    subs = db.execute("SELECT * FROM subscribers WHERE provider_id=?",(pid,)).fetchall()
+    rows = ''
+    for s in subs:
+        rows += f'<tr><td>{s["username"]}</td><td>{s["phone"] or "-"}</td><td>{s["package_name"] or "-"}</td><td>{s["expiry_date"] if s["expiry_date"] else "-"}</td><td>{s["created_at"]}</td></tr>'
+    if not rows: rows = '<tr><td colspan="5">No users found.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Users <a href="/subscribers" class="btn btn-success btn-small">Create User</a></div>
+    <table><thead><tr><th>Username</th><th>Phone</th><th>Package</th><th>Expiry</th><th>Last Online</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Users", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/subscribers', methods=['GET','POST'])
+@login_required
+def subscribers():
+    pid = session['provider_id']; db = get_db()
+    if request.method == 'POST':
+        u = request.form['username'].strip(); pw = request.form['password']; ph = request.form.get('phone','').strip()
+        pkg_id = request.form.get('package_id',''); expiry = request.form.get('expiry_date','')
+        pkg_name = db.execute("SELECT name FROM plans WHERE id=?",(pkg_id,)).fetchone()
+        try: db.execute("INSERT INTO subscribers (provider_id,username,password_hash,phone,package_name,expiry_date) VALUES (?,?,?,?,?,?)",(pid,u,generate_password_hash(pw),ph,pkg_name['name'] if pkg_name else '',expiry)); db.commit()
+        except: return render_page("Users",'<div class="card"><div class="alert alert-error">Username already exists.</div><p><a href="/users">Back</a></p></div>', get_pending_count(pid), pid, admin=True)
+        return redirect('/users')
+    pkg_opts = get_plan_options(pid, public_only=False)
+    return render_page("Create User",f'''<div class="card"><div class="card-header">Create User</div>
+    <form method="POST"><label>Username</label><input type="text" name="username" required><label>Password</label><input type="password" name="password" required><label>Phone (optional)</label><input type="tel" name="phone">
+    <label>Package*</label><select name="package_id" required>{pkg_opts}</select><a href="/plans/add" target="_blank" style="font-size:0.8rem;">+ Add new package</a>
+    <label>Expiry Date</label><input type="date" name="expiry_date"><button type="submit" class="btn btn-success" style="margin-top:15px;">Create Subscriber</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/delete-subscriber/<int:sid>')
+@login_required
+def delete_subscriber(sid):
+    db = get_db(); db.execute("DELETE FROM subscribers WHERE id=? AND provider_id=?",(sid,session['provider_id'])); db.execute("DELETE FROM sessions WHERE subscriber_id=?",(sid,)); db.commit()
+    return redirect('/users')
 
 # ------------------------------------------------------------
-# SUPER ADMIN (Professional – with invoices, messaging, audit log)
+# EXPIRY DATES
+# ------------------------------------------------------------
+@app.route('/expiry-dates')
+@login_required
+def expiry_dates():
+    pid = session['provider_id']; db = get_db()
+    items = db.execute("SELECT e.*, s.username FROM expiry_dates e JOIN subscribers s ON e.user_id=s.id WHERE e.provider_id=? ORDER BY e.expiry_date DESC",(pid,)).fetchall()
+    rows = ''.join(f'<tr><td>{e["username"]}</td><td>{e["expiry_date"]}</td><td>{e["grace_period"]}</td><td><a href="/expiry-dates/edit/{e["id"]}" class="btn btn-small">Edit</a> <a href="/expiry-dates/delete/{e["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for e in items) or '<tr><td colspan="4">No expiry dates set.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Expiry Dates <a href="/expiry-dates/add" class="btn btn-success btn-small">Create Expiry Date</a></div>
+    <table><thead><tr><th>User</th><th>Expiry Date</th><th>Grace Period</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Expiry Dates", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/expiry-dates/add', methods=['GET','POST'])
+@login_required
+def add_expiry_date():
+    if request.method == 'POST':
+        db = get_db(); db.execute("INSERT INTO expiry_dates (provider_id,user_id,expiry_date,grace_period) VALUES (?,?,?,?)",(session['provider_id'], int(request.form['user_id']), request.form['expiry_date'], int(request.form.get('grace',0)))); db.commit()
+        return redirect('/expiry-dates')
+    db = get_db(); users = db.execute("SELECT id, username FROM subscribers WHERE provider_id=?",(session['provider_id'],)).fetchall()
+    user_opts = ''.join(f'<option value="{u["id"]}">{u["username"]}</option>' for u in users)
+    return render_page("Create Expiry Date",f'''<div class="card"><div class="card-header">Create Expiry Date</div>
+    <form method="POST"><label>User*</label><select name="user_id" required>{user_opts}</select>
+    <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Hour</button>
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(hours=12)).strftime('%Y-%m-%dT%H:%M')}'">+ 12 Hours</button>
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Day</button>
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=7)).strftime('%Y-%m-%dT%H:%M')}'">+ 7 Days</button>
+        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=30)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Month</button>
+    </div>
+    <label>Expiry Date*</label><input type="datetime-local" name="expiry_date" required>
+    <label>Grace Period (days)</label><input type="number" name="grace" value="0">
+    <button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/expiry-dates/edit/<int:eid>', methods=['GET','POST'])
+@login_required
+def edit_expiry_date(eid):
+    db = get_db()
+    if request.method == 'POST': db.execute("UPDATE expiry_dates SET expiry_date=?,grace_period=? WHERE id=? AND provider_id=?",(request.form['expiry_date'],int(request.form.get('grace',0)),eid,session['provider_id'])); db.commit(); return redirect('/expiry-dates')
+    e = db.execute("SELECT * FROM expiry_dates WHERE id=? AND provider_id=?",(eid,session['provider_id'])).fetchone()
+    if not e: return "Not found", 404
+    users = db.execute("SELECT id, username FROM subscribers WHERE provider_id=?",(session['provider_id'],)).fetchall()
+    user_opts = ''.join(f'<option value="{u["id"]}" {"selected" if u["id"]==e["user_id"] else ""}>{u["username"]}</option>' for u in users)
+    return render_page("Edit Expiry Date",f'''<div class="card"><div class="card-header">Edit Expiry Date</div><form method="POST"><label>User</label><select name="user_id">{user_opts}</select>
+    <label>Expiry Date</label><input type="datetime-local" name="expiry_date" value="{e["expiry_date"]}" required>
+    <label>Grace Period (days)</label><input type="number" name="grace" value="{e["grace_period"]}">
+    <button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/expiry-dates/delete/<int:eid>')
+@login_required
+def delete_expiry_date(eid): db = get_db(); db.execute("DELETE FROM expiry_dates WHERE id=? AND provider_id=?",(eid,session['provider_id'])); db.commit(); return redirect('/expiry-dates')
+
+# ------------------------------------------------------------
+# IP BINDINGS
+# ------------------------------------------------------------
+@app.route('/ip-bindings')
+@login_required
+def ip_bindings():
+    pid = session['provider_id']; db = get_db()
+    items = db.execute("SELECT * FROM ip_bindings WHERE provider_id=? ORDER BY id DESC",(pid,)).fetchall()
+    rows = ''.join(f'<tr><td>{i["name"]}</td><td>{i["mikrotik_id"] or "-"}</td><td>{i["address"]}</td><td>{i["package_id"] or "-"}</td><td>{i["expires_at"] or "-"}</td><td><a href="/ip-bindings/edit/{i["id"]}" class="btn btn-small">Edit</a> <a href="/ip-bindings/delete/{i["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for i in items) or '<tr><td colspan="6">No IP bindings.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">IP Bindings <a href="/ip-bindings/add" class="btn btn-success btn-small">Bind IP</a></div>
+    <table><thead><tr><th>Name</th><th>MikroTik</th><th>Address</th><th>Package</th><th>Expiry</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("IP Bindings", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/ip-bindings/add', methods=['GET','POST'])
+@login_required
+def add_ip_binding():
+    if request.method == 'POST':
+        db = get_db(); db.execute("INSERT INTO ip_bindings (provider_id,mikrotik_id,name,package_id,dhcp_lease,address,mac_address,expires_at) VALUES (?,?,?,?,?,?,?,?)",
+                   (session['provider_id'], int(request.form.get('mikrotik_id',0)), request.form['name'], int(request.form.get('package_id',0)), request.form.get('dhcp',''), request.form['address'], request.form['mac'], request.form.get('expires_at'))); db.commit()
+        return redirect('/ip-bindings')
+    db = get_db(); routers = db.execute("SELECT id, name FROM mikrotik_routers WHERE provider_id=?",(session['provider_id'],)).fetchall()
+    router_opts = ''.join(f'<option value="{r["id"]}">{r["name"]}</option>' for r in routers)
+    packages = db.execute("SELECT id, name FROM plans WHERE provider_id=? AND is_active=1",(session['provider_id'],)).fetchall()
+    pkg_opts = ''.join(f'<option value="{p["id"]}">{p["name"]}</option>' for p in packages)
+    return render_page("Bind an IP",f'''<div class="card"><div class="card-header">Bind an IP</div>
+    <form method="POST"><label>MikroTik*</label><select name="mikrotik_id">{router_opts}</select>
+    <label>Name*</label><input type="text" name="name" required>
+    <label>Package</label><select name="package_id"><option value="">None</option>{pkg_opts}</select>
+    <label>DHCP Lease</label><input type="text" name="dhcp" placeholder="Select a DHCP lease to auto-fill">
+    <label>Address*</label><input type="text" name="address" required>
+    <label>MAC Address*</label><input type="text" name="mac" required>
+    <label>Expires At (Optional)</label><input type="datetime-local" name="expires_at">
+    <button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/ip-bindings/edit/<int:bid>', methods=['GET','POST'])
+@login_required
+def edit_ip_binding(bid):
+    db = get_db()
+    if request.method == 'POST': db.execute("UPDATE ip_bindings SET mikrotik_id=?,name=?,package_id=?,dhcp_lease=?,address=?,mac_address=?,expires_at=? WHERE id=? AND provider_id=?",(int(request.form.get('mikrotik_id',0)), request.form['name'], int(request.form.get('package_id',0)), request.form.get('dhcp',''), request.form['address'], request.form['mac'], request.form.get('expires_at'), bid, session['provider_id'])); db.commit(); return redirect('/ip-bindings')
+    b = db.execute("SELECT * FROM ip_bindings WHERE id=? AND provider_id=?",(bid,session['provider_id'])).fetchone()
+    if not b: return "Not found", 404
+    routers = db.execute("SELECT id, name FROM mikrotik_routers WHERE provider_id=?",(session['provider_id'],)).fetchall(); router_opts = ''.join(f'<option value="{r["id"]}" {"selected" if r["id"]==b["mikrotik_id"] else ""}>{r["name"]}</option>' for r in routers)
+    packages = db.execute("SELECT id, name FROM plans WHERE provider_id=? AND is_active=1",(session['provider_id'],)).fetchall(); pkg_opts = ''.join(f'<option value="{p["id"]}" {"selected" if p["id"]==b["package_id"] else ""}>{p["name"]}</option>' for p in packages)
+    return render_page("Edit IP Binding",f'''<div class="card"><div class="card-header">Edit IP Binding</div><form method="POST"><label>MikroTik</label><select name="mikrotik_id">{router_opts}</select>
+    <label>Name</label><input type="text" name="name" value="{b["name"]}" required><label>Package</label><select name="package_id"><option value="">None</option>{pkg_opts}</select>
+    <label>Address</label><input type="text" name="address" value="{b["address"]}" required><label>MAC Address</label><input type="text" name="mac" value="{b["mac_address"]}" required>
+    <label>Expires At</label><input type="datetime-local" name="expires_at" value="{b["expires_at"] if b["expires_at"] else ""}"><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/ip-bindings/delete/<int:bid>')
+@login_required
+def delete_ip_binding(bid): db = get_db(); db.execute("DELETE FROM ip_bindings WHERE id=? AND provider_id=?",(bid,session['provider_id'])); db.commit(); return redirect('/ip-bindings')
+
+# ------------------------------------------------------------
+# TICKETS
+# ------------------------------------------------------------
+@app.route('/tickets')
+@login_required
+def tickets():
+    pid = session['provider_id']; db = get_db(); items = db.execute("SELECT * FROM tickets WHERE provider_id=? ORDER BY id DESC",(pid,)).fetchall()
+    rows = ''.join(f'<tr><td>{t["subject"]}</td><td>TICKET-{t["id"]}</td><td>{t["status"]}</td><td>{t["priority"]}</td><td>{t["created_at"][:16] if t["created_at"] else ""}</td><td><a href="/tickets/edit/{t["id"]}" class="btn btn-small">Edit</a> <a href="/tickets/delete/{t["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for t in items) or '<tr><td colspan="6">No tickets have been raised yet.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Tickets <a href="/tickets/add" class="btn btn-success btn-small">Raise Ticket</a></div>
+    <div class="tabs"><span class="tab active">Open Tickets</span><span class="tab">Closed Tickets</span></div>
+    <table><thead><tr><th>Client</th><th>Ticket #</th><th>Status</th><th>Priority</th><th>Created at</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Tickets", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/tickets/add', methods=['GET','POST'])
+@login_required
+def add_ticket():
+    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO tickets (provider_id,subject,description,priority,status) VALUES (?,?,?,?,?)",(session['provider_id'],request.form['subject'],request.form['description'],request.form['priority'],request.form['status'])); db.commit(); return redirect('/tickets')
+    return render_page("Raise Ticket",'''<div class="card"><div class="card-header">Raise Ticket</div>
+    <form method="POST"><label>Client*</label><input type="text" name="client" required><label>Subject*</label><input type="text" name="subject" required>
+    <label>Status</label><select name="status"><option value="open">Open</option><option value="closed">Closed</option></select>
+    <label>Priority</label><select name="priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
+    <label>Description*</label><textarea name="description" required></textarea><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/tickets/edit/<int:tid>', methods=['GET','POST'])
+@login_required
+def edit_ticket(tid):
+    db = get_db()
+    if request.method == 'POST': db.execute("UPDATE tickets SET subject=?,description=?,status=?,priority=? WHERE id=? AND provider_id=?",(request.form['subject'],request.form['description'],request.form['status'],request.form['priority'],tid,session['provider_id'])); db.commit(); return redirect('/tickets')
+    t = db.execute("SELECT * FROM tickets WHERE id=? AND provider_id=?",(tid,session['provider_id'])).fetchone()
+    if not t: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit Ticket</div><form method="POST"><label>Subject</label><input type="text" name="subject" value="{t["subject"]}" required><label>Status</label><select name="status"><option value="open" {"selected" if t["status"]=="open" else ""}>Open</option><option value="closed" {"selected" if t["status"]=="closed" else ""}>Closed</option></select><label>Priority</label><select name="priority"><option value="medium" {"selected" if t["priority"]=="medium" else ""}>Medium</option><option value="high" {"selected" if t["priority"]=="high" else ""}>High</option><option value="low" {"selected" if t["priority"]=="low" else ""}>Low</option></select><label>Description</label><textarea name="description">{t["description"] or ""}</textarea><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Ticket", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/tickets/delete/<int:tid>')
+@login_required
+def delete_ticket(tid): db = get_db(); db.execute("DELETE FROM tickets WHERE id=? AND provider_id=?",(tid,session['provider_id'])); db.commit(); return redirect('/tickets')
+
+# ------------------------------------------------------------
+# LEADS
+# ------------------------------------------------------------
+@app.route('/leads')
+@login_required
+def leads():
+    pid = session['provider_id']; db = get_db(); items = db.execute("SELECT * FROM leads WHERE provider_id=? ORDER BY id DESC",(pid,)).fetchall()
+    rows = ''.join(f'<tr><td>{l["name"]}</td><td>{l["email"] or "-"}</td><td>{l["phone"] or "-"}</td><td>{l["source"] or "-"}</td><td><a href="/leads/edit/{l["id"]}" class="btn btn-small">Edit</a> <a href="/leads/delete/{l["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for l in items) or '<tr><td colspan="5">No leads yet.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Leads <a href="/leads/add" class="btn btn-success btn-small">Create a new lead</a></div>
+    <table><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Leads", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/leads/add', methods=['GET','POST'])
+@login_required
+def add_lead():
+    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO leads (provider_id,name,phone,email,source) VALUES (?,?,?,?,?)",(session['provider_id'],request.form['name'],request.form['phone'],request.form['email'],request.form['address'])); db.commit(); return redirect('/leads')
+    return render_page("Create Lead",'''<div class="card"><div class="card-header">Create a new lead</div>
+    <form method="POST"><label>Name*</label><input type="text" name="name" required><label>Email</label><input type="email" name="email"><label>Phone*</label><input type="tel" name="phone" required><label>Address*</label><input type="text" name="address" required><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/leads/edit/<int:lid>', methods=['GET','POST'])
+@login_required
+def edit_lead(lid):
+    db = get_db()
+    if request.method == 'POST': db.execute("UPDATE leads SET name=?,phone=?,email=?,source=? WHERE id=? AND provider_id=?",(request.form['name'],request.form['phone'],request.form['email'],request.form['address'],lid,session['provider_id'])); db.commit(); return redirect('/leads')
+    l = db.execute("SELECT * FROM leads WHERE id=? AND provider_id=?",(lid,session['provider_id'])).fetchone()
+    if not l: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit Lead</div><form method="POST"><label>Name*</label><input type="text" name="name" value="{l["name"]}" required><label>Email</label><input type="email" name="email" value="{l["email"] or ""}"><label>Phone*</label><input type="tel" name="phone" value="{l["phone"] or ""}" required><label>Address*</label><input type="text" name="address" value="{l["source"] or ""}" required><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Lead", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/leads/delete/<int:lid>')
+@login_required
+def delete_lead(lid): db = get_db(); db.execute("DELETE FROM leads WHERE id=? AND provider_id=?",(lid,session['provider_id'])); db.commit(); return redirect('/leads')
+
+# ------------------------------------------------------------
+# PACKAGES (Plans)
+# ------------------------------------------------------------
+@app.route('/plans')
+@login_required
+def list_plans():
+    pid = session['provider_id']; db = get_db(); plans = db.execute("SELECT * FROM plans WHERE provider_id=? AND is_public=1",(pid,)).fetchall()
+    rows = ''.join(f'<tr><td>{p["name"]}</td><td>UGX {p["price_ugx"]:,}</td><td>{p["speed_down"] or "-"}/{p["speed_up"] or "-"}</td><td>{p["duration_minutes"]} min</td><td>Hotspot</td><td>1</td><td>{"Yes" if p["is_active"] else "No"}</td><td><a href="/plans/edit/{p["id"]}" class="btn btn-small">Edit</a> <a href="/plans/delete/{p["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for p in plans) or '<tr><td colspan="8">No packages yet.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Packages <a href="/plans/add" class="btn btn-success btn-small">Create Package</a></div>
+    <table><thead><tr><th>Name</th><th>Price</th><th>Speed</th><th>Time</th><th>Type</th><th>Devices</th><th>Enabled</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Packages", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/plans/add', methods=['GET','POST'])
+@login_required
+def add_plan():
+    if request.method == 'POST':
+        db = get_db(); db.execute("INSERT INTO plans (provider_id,name,duration_minutes,price_ugx,is_public,speed_down,speed_up) VALUES (?,?,?,?,1,?,?)",(session['provider_id'],request.form['name'],int(request.form['duration']),int(request.form['price']),request.form.get('speed_down',''),request.form.get('speed_up',''))); db.commit()
+        return redirect('/plans')
+    return render_page("Create Package",'''<div class="card"><div class="card-header">Create Package</div>
+    <form method="POST"><label>Name of package*</label><input type="text" name="name" required><label>Duration (minutes)*</label><input type="number" name="duration" required><label>Price (UGX)*</label><input type="number" name="price" required><label>Download Speed</label><input type="text" name="speed_down" placeholder="e.g. 5M"><label>Upload Speed</label><input type="text" name="speed_up" placeholder="e.g. 2M"><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/plans/edit/<int:plid>', methods=['GET','POST'])
+@login_required
+def edit_plan(plid):
+    db = get_db(); plan = db.execute("SELECT * FROM plans WHERE id=? AND provider_id=?",(plid,session['provider_id'])).fetchone()
+    if not plan: return "Not found", 404
+    if request.method == 'POST':
+        db.execute("UPDATE plans SET name=?,duration_minutes=?,price_ugx=?,is_active=?,speed_down=?,speed_up=? WHERE id=?",(request.form['name'],int(request.form['duration']),int(request.form['price']),int(request.form.get('is_active','1')),request.form.get('speed_down',''),request.form.get('speed_up',''),plid)); db.commit()
+        return redirect('/plans')
+    content = f'<div class="card"><div class="card-header">Edit Package</div><form method="POST"><label>Name</label><input type="text" name="name" value="{plan["name"]}" required><label>Duration</label><input type="number" name="duration" value="{plan["duration_minutes"]}" required><label>Price</label><input type="number" name="price" value="{plan["price_ugx"]}" required><label>Download Speed</label><input type="text" name="speed_down" value="{plan["speed_down"] or ""}"><label>Upload Speed</label><input type="text" name="speed_up" value="{plan["speed_up"] or ""}"><label>Active</label><select name="is_active"><option value="1" {"selected" if plan["is_active"] else ""}>Yes</option><option value="0" {"selected" if not plan["is_active"] else ""}>No</option></select><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Package", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/plans/delete/<int:plid>')
+@login_required
+def delete_plan(plid): db = get_db(); db.execute("DELETE FROM plans WHERE id=? AND provider_id=?",(plid,session['provider_id'])); db.commit(); return redirect('/plans')
+
+# ------------------------------------------------------------
+# PAYMENTS
+# ------------------------------------------------------------
+@app.route('/payments')
+@login_required
+def payments():
+    pid = session['provider_id']; db = get_db()
+    today = date.today().isoformat()
+    daily = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at)=?",(pid,today)).fetchone()['t']
+    weekly = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ?",(pid,(date.today()-timedelta(days=7)).isoformat())).fetchone()['t']
+    monthly = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ?",(pid,date.today().replace(day=1).isoformat())).fetchone()['t']
+    items = db.execute("SELECT vr.*, COALESCE(sub.username, vr.phone_number) as user_name FROM voucher_requests vr LEFT JOIN subscribers sub ON sub.phone=vr.phone_number WHERE vr.provider_id=? ORDER BY vr.created_at DESC LIMIT 50",(pid,)).fetchall()
+    rows = ''
+    for i in items:
+        checked = "Yes" if i['status'] == 'approved' else "No"
+        rows += f'<tr><td>{i["user_name"]}</td><td>{i["phone_number"]}</td><td>{i["transaction_id"]}</td><td>UGX {i["amount"] or 0:,}</td><td>{checked}</td><td>{i["created_at"][:16] if i["created_at"] else ""}</td>'
+        if i['status'] == 'pending': rows += f'<td><a href="/approve/{i["id"]}" class="btn btn-small btn-success">Approve</a> <a href="/reject/{i["id"]}" class="btn btn-small btn-danger">Reject</a></td>'
+        else: rows += '<td>-</td>'
+        rows += '</tr>'
+    if not rows: rows = '<tr><td colspan="7">No payments yet.</td></tr>'
+    content = f'''<div class="stat-grid"><div class="stat-card"><h3>UGX {daily or 0:,}</h3><small>Daily Earnings</small></div><div class="stat-card"><h3>UGX {weekly or 0:,}</h3><small>Weekly Earnings</small></div><div class="stat-card"><h3>UGX {monthly or 0:,}</h3><small>Monthly Earnings</small></div></div>
+    <div class="card"><div class="card-header">Payments <a href="/record-payment" class="btn btn-success btn-small">Record Payment</a></div>
+    <div class="tabs"><a href="/payments?filter=all" class="tab active">All</a><a href="/payments?filter=checked" class="tab">Checked</a><a href="/payments?filter=unchecked" class="tab">Unchecked</a></div>
+    <table><thead><tr><th>User</th><th>Phone</th><th>Receipt No.</th><th>Amount</th><th>Checked</th><th>Paid At</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Payments", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/record-payment', methods=['GET','POST'])
+@login_required
+def record_payment():
+    if request.method == 'POST':
+        db = get_db(); db.execute("INSERT INTO voucher_requests (provider_id,phone_number,plan_id,raw_sms,transaction_id,amount,recipient,payment_date,status) VALUES (?,'manual',1,'manual',?,?,'manual',date('now'),'approved')",
+                   (session['provider_id'], request.form['receipt'], float(request.form['amount']))); db.commit()
+        return redirect('/payments')
+    return render_page("Record Payment",'''<div class="card"><div class="card-header">Record Payment</div>
+    <form method="POST"><label>Receipt Number*</label><input type="text" name="receipt" required><label>Amount (UGX)*</label><input type="number" name="amount" step="0.01" required><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/approve/<int:rid>')
+@login_required
+def approve(rid):
+    pid = session['provider_id']; db = get_db(); r = db.execute("SELECT phone_number,plan_id FROM voucher_requests WHERE id=? AND provider_id=?",(rid,pid)).fetchone()
+    if r: code = generate_voucher_code(); db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number) VALUES (?,?,?,'sms',?)",(pid,code,r['plan_id'],r['phone_number'])); db.execute("UPDATE voucher_requests SET status='approved',voucher_code=? WHERE id=?",(code,rid)); db.commit()
+    return redirect('/payments')
+
+@app.route('/reject/<int:rid>')
+@login_required
+def reject(rid):
+    pid = session['provider_id']; db = get_db(); db.execute("UPDATE voucher_requests SET status='rejected' WHERE id=? AND provider_id=?",(rid,pid)); db.commit()
+    return redirect('/payments')
+
+# ------------------------------------------------------------
+# VOUCHERS
+# ------------------------------------------------------------
+@app.route('/vouchers')
+@login_required
+def vouchers_list():
+    pid = session['provider_id']; db = get_db()
+    filter_type = request.args.get('filter', 'all')
+    query = "SELECT v.code, p.name as pn, v.batch_id, v.phone_number, v.used_at, v.created_at, v.used FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? "
+    params = [pid]
+    if filter_type == 'used': query += " AND v.used=1"
+    elif filter_type == 'unused': query += " AND v.used=0"
+    query += " ORDER BY v.id DESC LIMIT 100"
+    vouchers = db.execute(query, params).fetchall()
+    rows = ''.join(f'<tr><td>{v["code"]}</td><td>{v["pn"]}</td><td>{v["batch_id"] or "-"}</td><td>{v["phone_number"] or "-"}</td><td>{v["used_at"] or "-"}</td><td>Never</td></tr>' for v in vouchers) or '<tr><td colspan="6">No vouchers found.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Vouchers <a href="/vouchers/bulk" class="btn btn-success btn-small">Create Voucher</a></div>
+    <div class="tabs"><a href="/vouchers?filter=all" class="tab {'active' if filter_type=='all' else ''}">All</a><a href="/vouchers?filter=unused" class="tab {'active' if filter_type=='unused' else ''}">Unused</a><a href="/vouchers?filter=used" class="tab {'active' if filter_type=='used' else ''}">Used</a></div>
+    <table><thead><tr><th>Voucher Code</th><th>Package</th><th>Batch</th><th>Used By</th><th>Used At</th><th>Unused Expiry</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Vouchers", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/vouchers/bulk', methods=['GET','POST'])
+@login_required
+def vouchers_bulk():
+    pid = session['provider_id']
+    if request.method == 'POST':
+        plan_id = int(request.form['plan_id']); count = int(request.form['count']); prefix = request.form.get('prefix','').strip().upper(); length = int(request.form['length']); expiry_days = request.form.get('expiry_days')
+        batch_id = f"BATCH-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        db = get_db(); codes = []
+        expiry_date = (date.today() + timedelta(days=int(expiry_days))).isoformat() if expiry_days else None
+        for _ in range(count):
+            if length > 0: code = prefix + ''.join(random.choices(string.ascii_uppercase+string.digits, k=length))
+            else: code = generate_voucher_code()
+            while db.execute("SELECT COUNT(*) as cnt FROM vouchers WHERE code=?",(code,)).fetchone()['cnt'] > 0:
+                code = prefix + ''.join(random.choices(string.ascii_uppercase+string.digits, k=length)) if length > 0 else generate_voucher_code()
+            db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, batch_id, expiry_date) VALUES (?,?,?,'bulk',?,?)",(pid, code, plan_id, batch_id, expiry_date)); codes.append(code)
+        db.commit()
+        content = f'<div class="card"><div class="alert alert-success">{count} vouchers generated!</div><p><strong>Batch ID:</strong> {batch_id}</p><div class="voucher-code" style="font-size:1rem;max-height:300px;overflow-y:auto;color:#fff;">{"<br>".join(codes)}</div><a href="/vouchers" class="btn">Back to Vouchers</a></div>'
+        return render_page("Bulk Vouchers", content, get_pending_count(pid), pid, admin=True)
+    content = f'''<div class="card"><div class="card-header">Generate Vouchers</div><form method="POST">
+    <label>Package*</label><select name="plan_id" required>{get_plan_options(pid, public_only=False)}</select>
+    <label>Number of Vouchers*</label><input type="number" name="count" value="10" min="1" required>
+    <label>Voucher Prefix*</label><input type="text" name="prefix" placeholder="e.g. ROCK" maxlength="2">
+    <label>Voucher Code Length* (6-12)</label><input type="number" name="length" value="8" min="6" max="12">
+    <label>Unused Voucher Expiry (days, optional)</label><input type="number" name="expiry_days" placeholder="Leave empty for no expiry">
+    <button type="submit" class="btn" style="margin-top:20px;">Generate</button></form></div>'''
+    return render_page("Generate Vouchers", content, get_pending_count(pid), pid, admin=True)
+
+# ------------------------------------------------------------
+# INVOICES
+# ------------------------------------------------------------
+@app.route('/invoices')
+@login_required
+def invoices():
+    pid = session['provider_id']; db = get_db(); items = db.execute("SELECT * FROM invoices WHERE provider_id=? ORDER BY id DESC",(pid,)).fetchall()
+    rows = ''.join(f'<tr><td>{i["invoice_no"]}</td><td>{i["user_id"]}</td><td>UGX {i["amount"] or 0:,}</td><td>UGX {i["paid_amount"] or 0:,}</td><td>UGX {(i["amount"] or 0)-(i["paid_amount"] or 0):,}</td><td>{i["status"]}</td><td>{i["due_date"]}</td></tr>' for i in items) or '<tr><td colspan="7">No invoices yet.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Invoices <a href="/invoices/add" class="btn btn-success btn-small">Create Invoice</a></div>
+    <table><thead><tr><th>Invoice No.</th><th>User</th><th>Amount</th><th>Paid Amount</th><th>Remaining</th><th>Status</th><th>Due date</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Invoices", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/invoices/add', methods=['GET','POST'])
+@login_required
+def add_invoice():
+    if request.method == 'POST':
+        db = get_db(); inv_no = f"INV-{datetime.now().strftime('%Y%m')}-{random.randint(1000,9999)}"
+        db.execute("INSERT INTO invoices (provider_id,invoice_no,user_id,amount,paid_amount,status,due_date) VALUES (?,?,?,?,0,'pending',?)",(session['provider_id'],inv_no,int(request.form['user_id']),float(request.form['amount']),request.form['due_date'])); db.commit()
+        return redirect('/invoices')
+    return render_page("Create Invoice",'''<div class="card"><div class="card-header">Create Invoice</div>
+    <form method="POST"><label>User ID*</label><input type="number" name="user_id" required><label>Amount (UGX)*</label><input type="number" name="amount" step="0.01" required><label>Due Date</label><input type="date" name="due_date"><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+# ------------------------------------------------------------
+# EXPENSES
+# ------------------------------------------------------------
+@app.route('/expenses')
+@login_required
+def expenses():
+    pid = session['provider_id']; db = get_db(); items = db.execute("SELECT * FROM expenses WHERE provider_id=? ORDER BY expense_date DESC",(pid,)).fetchall()
+    rows = ''.join(f'<tr><td>{e["expense_date"]}</td><td>{e["category"]}</td><td>UGX {e["amount"]:,.0f}</td><td>{e["payment_method"] or "-"}</td><td><a href="/expenses/edit/{e["id"]}" class="btn btn-small">Edit</a></td></tr>' for e in items) or '<tr><td colspan="5">No expenses yet.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Expenses <a href="/expenses/add" class="btn btn-success btn-small">Create Expense</a></div>
+    <table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Method</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Expenses", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/expenses/add', methods=['GET','POST'])
+@login_required
+def add_expense():
+    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO expenses (provider_id,description,amount,category,expense_date,payment_method) VALUES (?,?,?,?,?,?)",(session['provider_id'],request.form['description'],float(request.form['amount']),request.form['type'],request.form['date'],request.form['method'])); db.commit(); return redirect('/expenses')
+    return render_page("Create Expense",'''<div class="card"><div class="card-header">Create Expense</div>
+    <form method="POST"><label>Type*</label><input type="text" name="type" required><label>Amount (UGX)*</label><input type="number" name="amount" step="0.01" required><label>Date*</label><input type="date" name="date" required><label>Payment method*</label><select name="method"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="bank_transfer">Bank Transfer</option></select><label>Description</label><input type="text" name="description"><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/expenses/edit/<int:eid>', methods=['GET','POST'])
+@login_required
+def edit_expense(eid):
+    db = get_db()
+    if request.method == 'POST': db.execute("UPDATE expenses SET description=?,amount=?,category=?,expense_date=?,payment_method=? WHERE id=? AND provider_id=?",(request.form['description'],float(request.form['amount']),request.form['type'],request.form['date'],request.form['method'],eid,session['provider_id'])); db.commit(); return redirect('/expenses')
+    e = db.execute("SELECT * FROM expenses WHERE id=? AND provider_id=?",(eid,session['provider_id'])).fetchone()
+    if not e: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit Expense</div><form method="POST"><label>Type</label><input type="text" name="type" value="{e["category"]}" required><label>Amount (UGX)</label><input type="number" name="amount" step="0.01" value="{e["amount"]}" required><label>Date</label><input type="date" name="date" value="{e["expense_date"]}" required><label>Payment method</label><select name="method"><option value="cash" {"selected" if e["payment_method"]=="cash" else ""}>Cash</option><option value="mpesa" {"selected" if e["payment_method"]=="mpesa" else ""}>M-Pesa</option><option value="bank_transfer" {"selected" if e["payment_method"]=="bank_transfer" else ""}>Bank Transfer</option></select><label>Description</label><input type="text" name="description" value="{e["description"] or ""}"><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Expense", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/expenses/delete/<int:eid>')
+@login_required
+def delete_expense(eid): db = get_db(); db.execute("DELETE FROM expenses WHERE id=? AND provider_id=?",(eid,session['provider_id'])); db.commit(); return redirect('/expenses')
+
+# ------------------------------------------------------------
+# MESSAGES
+# ------------------------------------------------------------
+@app.route('/messages', methods=['GET','POST'])
+@login_required
+def messages():
+    pid = session['provider_id']
+    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO sms_log (provider_id,phone_number,message) VALUES (?,?,?)",(pid,request.form.get('phone',''),request.form['message'])); db.commit(); return redirect('/messages')
+    db = get_db(); msgs = db.execute("SELECT * FROM sms_log WHERE provider_id=? ORDER BY id DESC LIMIT 50",(pid,)).fetchall()
+    rows = "".join(f'<tr><td>{m["phone_number"]}</td><td>SMS</td><td>{m["message"]}</td><td>Yes</td><td>-</td><td>{m["sent_at"][:16] if m["sent_at"] else ""}</td></tr>' for m in msgs) or '<tr><td colspan="6">No messages sent.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Messages <a href="/messages/send" class="btn btn-success btn-small">Send message</a></div>
+    <table><thead><tr><th>User</th><th>Channel</th><th>Message</th><th>Delivered</th><th>Cost</th><th>Sent</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Messages", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/messages/send', methods=['GET','POST'])
+@login_required
+def send_message():
+    if request.method == 'POST': return redirect('/messages')
+    return render_page("Create Message",'''<div class="card"><div class="card-header">Create Message</div>
+    <form method="POST"><label>Channel</label><select><option>SMS</option><option>WhatsApp</option></select><label>Message*</label><textarea name="message" required></textarea><button type="submit" class="btn" style="margin-top:20px;">Send</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+# ------------------------------------------------------------
+# EMAIL
+# ------------------------------------------------------------
+@app.route('/email', methods=['GET','POST'])
+@login_required
+def email():
+    if request.method == 'POST': return redirect('/email')
+    return render_page("Emails",'''<div class="card"><div class="card-header">Emails <a href="/email/send" class="btn btn-success btn-small">Send Email</a></div>
+    <table><thead><tr><th>Subject</th><th>Email</th><th>Message</th><th>Status</th><th>Sent At</th></tr></thead><tbody><tr><td colspan="5">No emails sent yet.</td></tr></tbody></table></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/email/send', methods=['GET','POST'])
+@login_required
+def send_email():
+    if request.method == 'POST': return redirect('/email')
+    return render_page("Send Email",'''<div class="card"><div class="card-header">Send Email</div>
+    <form method="POST"><label>Subject*</label><input type="text" name="subject" required><label>Message*</label><textarea name="message" required></textarea><button type="submit" class="btn" style="margin-top:20px;">Send</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+# ------------------------------------------------------------
+# CAMPAIGNS
+# ------------------------------------------------------------
+@app.route('/campaign')
+@login_required
+def campaign():
+    pid = session['provider_id']; db = get_db(); items = db.execute("SELECT * FROM campaigns WHERE provider_id=? ORDER BY id DESC",(pid,)).fetchall()
+    rows = ''.join(f'<tr><td>{c["name"]}</td><td>{c["kind"]}</td><td>{c["type"]}</td><td>{c["start_date"] or "-"}</td><td>{c["end_date"] or "-"}</td><td>{c["status"]}</td><td>0</td><td>0</td><td>0</td></tr>' for c in items) or '<tr><td colspan="9">No campaigns found.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Campaigns <a href="/campaign/add" class="btn btn-success btn-small">Create Campaign</a></div>
+    <table><thead><tr><th>Campaign</th><th>Kind</th><th>Type</th><th>Scheduled At</th><th>End Date</th><th>Status</th><th>Targets</th><th>Sent</th><th>Failed</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Campaigns", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/campaign/add', methods=['GET','POST'])
+@login_required
+def add_campaign():
+    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO campaigns (provider_id,name,description,kind,type,start_date,end_date,status) VALUES (?,?,?,?,?,?,?,'active')",(session['provider_id'],request.form['name'],request.form['description'],request.form['kind'],request.form['type'],request.form['start_date'],request.form['end_date'])); db.commit(); return redirect('/campaign')
+    return render_page("Create Campaign",'''<div class="card"><div class="card-header">Create Campaign</div>
+    <form method="POST"><label>Name*</label><input type="text" name="name" required><label>Kind*</label><select name="kind"><option value="Portal Ad">Portal Ad</option><option value="Message">Message</option></select><label>Type*</label><input type="text" name="type" required><label>Start Date*</label><input type="date" name="start_date" required><label>End Date</label><input type="date" name="end_date"><label>Description</label><textarea name="description"></textarea><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/campaign/edit/<int:cid>', methods=['GET','POST'])
+@login_required
+def edit_campaign(cid):
+    db = get_db()
+    if request.method == 'POST': db.execute("UPDATE campaigns SET name=?,description=?,kind=?,type=?,start_date=?,end_date=?,status=? WHERE id=? AND provider_id=?",(request.form['name'],request.form['description'],request.form['kind'],request.form['type'],request.form['start_date'],request.form['end_date'],request.form['status'],cid,session['provider_id'])); db.commit(); return redirect('/campaign')
+    c = db.execute("SELECT * FROM campaigns WHERE id=? AND provider_id=?",(cid,session['provider_id'])).fetchone()
+    if not c: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit Campaign</div><form method="POST"><label>Name*</label><input type="text" name="name" value="{c["name"]}" required><label>Kind</label><select name="kind"><option value="Portal Ad" {"selected" if c["kind"]=="Portal Ad" else ""}>Portal Ad</option><option value="Message" {"selected" if c["kind"]=="Message" else ""}>Message</option></select><label>Type</label><input type="text" name="type" value="{c["type"] or ""}" required><label>Start Date</label><input type="date" name="start_date" value="{c["start_date"] if c["start_date"] else ""}" required><label>End Date</label><input type="date" name="end_date" value="{c["end_date"] if c["end_date"] else ""}"><label>Status</label><select name="status"><option value="active" {"selected" if c["status"]=="active" else ""}>Active</option><option value="inactive" {"selected" if c["status"]=="inactive" else ""}>Inactive</option></select><label>Description</label><textarea name="description">{c["description"] or ""}</textarea><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Campaign", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/campaign/delete/<int:cid>')
+@login_required
+def delete_campaign(cid): db = get_db(); db.execute("DELETE FROM campaigns WHERE id=? AND provider_id=?",(cid,session['provider_id'])); db.commit(); return redirect('/campaign')
+
+# ------------------------------------------------------------
+# MIKROTIK
+# ------------------------------------------------------------
+@app.route('/mikrotik')
+@login_required
+def mikrotik():
+    pid = session['provider_id']; db = get_db(); routers = db.execute("SELECT * FROM mikrotik_routers WHERE provider_id=? ORDER BY id DESC",(pid,)).fetchall()
+    rows = ''.join(f'<tr><td>{r["name"]}</td><td>{r["ip_address"] or ""}</td><td>{"Online" if r["is_active"] else "Offline"}</td><td>-</td><td>{"Active" if r["is_active"] else "Inactive"}</td><td><a href="/mikrotik/edit/{r["id"]}" class="btn btn-small">Edit</a> <a href="/mikrotik/delete/{r["id"]}" class="btn btn-small btn-danger" onclick="return confirm(\'Delete?\')">Del</a></td></tr>' for r in routers) or '<tr><td colspan="6">No Nas devices.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">MikroTik Routers <a href="/mikrotik/add" class="btn btn-success btn-small">Link a MikroTik</a></div>
+    <table><thead><tr><th>Board Name</th><th>Provisioning</th><th>CPU</th><th>Memory</th><th>Status</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("MikroTik", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/mikrotik/add', methods=['GET','POST'])
+@login_required
+def add_mikrotik():
+    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO mikrotik_routers (provider_id,name,ip_address,username,password,api_port,is_active) VALUES (?,?,?,?,?,?,?)",(session['provider_id'],request.form['name'],request.form['ip'],request.form['username'],request.form['password'],int(request.form['port'] or 8728),1 if request.form.get('is_active') else 0)); db.commit(); return redirect('/mikrotik')
+    return render_page("Add MikroTik Device",'''<div class="card"><div class="card-header">Add MikroTik Device</div>
+    <form method="POST"><label>Mikrotik Identity*</label><input type="text" name="name" required><label>IP Address</label><input type="text" name="ip"><label>Username</label><input type="text" name="username"><label>Password</label><input type="password" name="password"><label>API Port</label><input type="number" name="port" value="8728"><label><input type="checkbox" name="is_active" checked> Active</label><button type="submit" class="btn" style="margin-top:20px;">Save</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/mikrotik/edit/<int:rid>', methods=['GET','POST'])
+@login_required
+def edit_mikrotik(rid):
+    db = get_db()
+    if request.method == 'POST': db.execute("UPDATE mikrotik_routers SET name=?,ip_address=?,username=?,password=?,api_port=?,is_active=? WHERE id=? AND provider_id=?",(request.form['name'],request.form['ip'],request.form['username'],request.form['password'],int(request.form['port'] or 8728),1 if request.form.get('is_active') else 0,rid,session['provider_id'])); db.commit(); return redirect('/mikrotik')
+    r = db.execute("SELECT * FROM mikrotik_routers WHERE id=? AND provider_id=?",(rid,session['provider_id'])).fetchone()
+    if not r: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit MikroTik Router</div><form method="POST"><label>Name*</label><input type="text" name="name" value="{r["name"]}" required><label>IP Address</label><input type="text" name="ip" value="{r["ip_address"] or ""}"><label>Username</label><input type="text" name="username" value="{r["username"] or ""}"><label>Password</label><input type="password" name="password" value="{r["password"] or ""}"><label>API Port</label><input type="number" name="port" value="{r["api_port"] or 8728}"><label><input type="checkbox" name="is_active" {"checked" if r["is_active"] else ""}> Active</label><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit MikroTik", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/mikrotik/delete/<int:rid>')
+@login_required
+def delete_mikrotik(rid): db = get_db(); db.execute("DELETE FROM mikrotik_routers WHERE id=? AND provider_id=?",(rid,session['provider_id'])); db.commit(); return redirect('/mikrotik')
+
+# ------------------------------------------------------------
+# EQUIPMENT
+# ------------------------------------------------------------
+@app.route('/equipment')
+@login_required
+def equipment():
+    pid = session['provider_id']; db = get_db(); items = db.execute("SELECT * FROM equipment WHERE provider_id=? ORDER BY id DESC",(pid,)).fetchall()
+    rows = ''.join(f'<tr><td>{e["user_id"] or "-"}</td><td>{e["model"] or "-"}</td><td>{e["name"]}</td><td>UGX {e["price"] or 0:,}</td><td>UGX {e["paid_amount"] or 0:,}</td><td><a href="/equipment/edit/{e["id"]}" class="btn btn-small">Edit</a></td></tr>' for e in items) or '<tr><td colspan="6">No equipment yet.</td></tr>'
+    content = f'''<div class="card"><div class="card-header">Equipment <a href="/equipment/add" class="btn btn-success btn-small">Add Equipment</a></div>
+    <table><thead><tr><th>User</th><th>Type</th><th>Equipment Name</th><th>Equipment Price</th><th>Paid Amount</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+    return render_page("Equipment", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/equipment/add', methods=['GET','POST'])
+@login_required
+def add_equipment():
+    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO equipment (provider_id,name,model,serial_number,user_id,price,paid_amount) VALUES (?,?,?,?,?,?,?)",(session['provider_id'],request.form['name'],request.form['model'],request.form['serial'],int(request.form.get('user_id',0)),float(request.form.get('price',0)),float(request.form.get('paid',0)))); db.commit(); return redirect('/equipment')
+    return render_page("Create Equipment",'''<div class="card"><div class="card-header">Create Equipment</div>
+    <form method="POST"><label>Name*</label><input type="text" name="name" required><label>Model</label><input type="text" name="model"><label>Serial Number</label><input type="text" name="serial"><label>Price (UGX)</label><input type="number" name="price" step="0.01"><label>Paid Amount (UGX)</label><input type="number" name="paid" step="0.01"><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+@app.route('/equipment/edit/<int:eid>', methods=['GET','POST'])
+@login_required
+def edit_equipment(eid):
+    db = get_db()
+    if request.method == 'POST': db.execute("UPDATE equipment SET name=?,model=?,serial_number=?,price=?,paid_amount=? WHERE id=? AND provider_id=?",(request.form['name'],request.form['model'],request.form['serial'],float(request.form.get('price',0)),float(request.form.get('paid',0)),eid,session['provider_id'])); db.commit(); return redirect('/equipment')
+    eq = db.execute("SELECT * FROM equipment WHERE id=? AND provider_id=?",(eid,session['provider_id'])).fetchone()
+    if not eq: return "Not found", 404
+    content = f'<div class="card"><div class="card-header">Edit Equipment</div><form method="POST"><label>Name*</label><input type="text" name="name" value="{eq["name"]}" required><label>Model</label><input type="text" name="model" value="{eq["model"] or ""}"><label>Serial Number</label><input type="text" name="serial" value="{eq["serial_number"] or ""}"><label>Price (UGX)</label><input type="number" name="price" step="0.01" value="{eq["price"] or 0}"><label>Paid Amount (UGX)</label><input type="number" name="paid" step="0.01" value="{eq["paid_amount"] or 0}"><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    return render_page("Edit Equipment", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/equipment/delete/<int:eid>')
+@login_required
+def delete_equipment(eid): db = get_db(); db.execute("DELETE FROM equipment WHERE id=? AND provider_id=?",(eid,session['provider_id'])); db.commit(); return redirect('/equipment')
+
+# ------------------------------------------------------------
+# PROVIDER SETTINGS
+# ------------------------------------------------------------
+@app.route('/provider/edit', methods=['GET','POST'])
+@login_required
+def edit_provider():
+    prov = get_provider(session['provider_id'])
+    if request.method == 'POST':
+        pf = request.files.get('poster'); lf = request.files.get('logo')
+        pfn = prov['poster_image'] if prov else None; lfn = prov['logo_image'] if prov else None
+        if pf and pf.filename and allowed_file(pf.filename):
+            os.makedirs(os.path.join(os.getcwd(),'static','uploads'),exist_ok=True); pfn = secure_filename(pf.filename); pf.save(os.path.join(os.getcwd(),'static','uploads',pfn))
+        if lf and lf.filename and allowed_file(lf.filename):
+            os.makedirs(os.path.join(os.getcwd(),'static','uploads'),exist_ok=True); lfn = secure_filename(lf.filename); lf.save(os.path.join(os.getcwd(),'static','uploads',lfn))
+        db = get_db(); db.execute("UPDATE providers SET business_name=?,support_phone=?,poster_image=?,logo_image=?,yo_username=?,yo_password=?,yo_auto_pay=? WHERE id=?",(request.form['business_name'],request.form['support_phone'],pfn,lfn,request.form.get('yo_username',''),request.form.get('yo_password',''),int(request.form.get('yo_auto_pay',0)),session['provider_id']))
+        db.commit(); session['provider_name'] = request.form['business_name']; return redirect('/dashboard')
+    pd = f'<p>Current poster: <img src="/static/uploads/{prov["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if prov and prov['poster_image'] else ''
+    ld = f'<p>Current logo: <img src="/static/uploads/{prov["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if prov and prov['logo_image'] else ''
+    content = f'''<div class="card"><div class="card-header">Provider Settings</div><form method="POST" enctype="multipart/form-data">
+    <label>Business Name</label><input type="text" name="business_name" value="{prov["business_name"] if prov else ""}" required>
+    <label>Support WhatsApp</label><input type="text" name="support_phone" value="{prov["support_phone"] if prov else ""}">
+    <label>Yo! Payments Username</label><input type="text" name="yo_username" value="{prov["yo_username"] if prov else ''}">
+    <label>Yo! Payments Password</label><input type="password" name="yo_password" value="{prov["yo_password"] if prov else ''}">
+    <label>Enable Auto Payment (Yo! Payments)</label>
+    <select name="yo_auto_pay"><option value="1" {"selected" if prov and prov["yo_auto_pay"] else ""}>Yes</option><option value="0" {"selected" if not prov or not prov["yo_auto_pay"] else ""}>No</option></select>
+    <label>Portal Poster/Banner</label><input type="file" name="poster" accept="image/*">{pd}
+    <label>Business Logo</label><input type="file" name="logo" accept="image/*">{ld}
+    <button type="submit" class="btn" style="margin-top:20px;">Save Settings</button></form></div>'''
+    return render_page("Settings", content, get_pending_count(session['provider_id']), session['provider_id'], admin=True)
+
+@app.route('/toggle-auto')
+@login_required
+def toggle_auto():
+    db = get_db(); cur = get_auto_approve(session['provider_id']); db.execute("UPDATE providers SET auto_approve=? WHERE id=?",(0 if cur else 1, session['provider_id'])); db.commit()
+    return redirect('/dashboard')
+
+@app.route('/stats')
+@login_required
+def stats():
+    pid = session['provider_id']; db = get_db(); today = date.today().isoformat()
+    sms = db.execute("SELECT COUNT(*) as c, COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at)=?",(pid,today)).fetchone()
+    cash = db.execute("SELECT COUNT(*) as c, COALESCE(SUM(pl.price_ugx),0) as t FROM vouchers v JOIN plans pl ON v.plan_id=pl.id WHERE v.provider_id=? AND v.payment_method='cash' AND date(v.created_at)=?",(pid,today)).fetchone()
+    used = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=? AND used=1",(pid,)).fetchone()['c']
+    unused = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=? AND used=0",(pid,)).fetchone()['c']
+    pstats = db.execute("SELECT p.name, COUNT(*) as c FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? GROUP BY p.name ORDER BY c DESC",(pid,)).fetchall()
+    wf, ws, we = get_weekly_platform_revenue(pid)
+    content = f"""<div class="stat-grid"><div class="card" style="text-align:center;"><h3>UGX {sms['t'] or 0:,}</h3><small>SMS Revenue Today</small></div><div class="card" style="text-align:center;"><h3>UGX {cash['t'] or 0:,}</h3><small>Cash Revenue Today</small></div><div class="card" style="text-align:center;"><h3>{used}</h3><small>Vouchers Used</small></div><div class="card" style="text-align:center;"><h3>{unused}</h3><small>Vouchers Unused</small></div><div class="card" style="text-align:center;"><h3>{get_pending_count(pid)}</h3><small>Pending</small></div></div>
+    <div class="platform-revenue"><strong>RockabyTech Platform Fee (5% this week):</strong> UGX {wf:,} &nbsp; <small>({ws.strftime('%d %b')} - {we.strftime('%d %b')})</small></div>
+    <div class="card"><div class="card-header">Top Selling Plans</div><table><tr><th>Plan</th><th>Sold</th></tr>{''.join(f'<tr><td>{p["name"]}</td><td>{p["c"]}</td></tr>' for p in pstats) or '<tr><td colspan="2">No sales yet.</td></tr>'}</table></div><a href="/dashboard" class="btn btn-outline">Back to Dashboard</a>"""
+    return render_page("Statistics", content, get_pending_count(pid), pid, admin=True)
+
+# ------------------------------------------------------------
+# SUPER ADMIN
 # ------------------------------------------------------------
 SUPER_ADMIN_PASSWORD = 'rockabytech2025'
 
@@ -861,7 +1418,6 @@ def super_admin_login():
     if request.method == 'POST':
         if request.form.get('password') == SUPER_ADMIN_PASSWORD:
             session['super_admin'] = True
-            # Log the login
             db = get_db(); db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1, 'super_admin_login', 'Super admin logged in')"); db.commit()
             return redirect('/admin/dashboard')
         return render_page("Super Admin Login",'<div class="card"><div class="alert alert-error">Invalid password.</div><p><a href="/admin">Try again</a></p></div>',0,admin=False)
@@ -895,7 +1451,7 @@ def super_admin_dashboard():
             sub_status = "Expired"; expired = True
         row_class = 'style="background:rgba(255,212,59,0.1);"' if expired else ''
         rows += f'''<tr {row_class}><td>{p['id']}</td><td><strong>{p['business_name']}</strong></td><td>{p['contact']}</td><td><span class="badge" style="background:{'#51cf66' if sub_status=='Active' else '#ff6b6b' if sub_status=='Suspended' else '#ffd43b'};color:#000;padding:4px 10px;border-radius:12px;">{sub_status}</span></td><td>UGX {total or 0:,}</td><td>UGX {fee:,}</td><td>UGX {monthly_fee:,}</td><td>{voucher_count}</td><td>{expiry}</td>
-        <td><div class="dropdown"><button class="btn btn-small">⋮</button><div class="dropdown-content">
+        <td style="overflow:visible;"><div class="dropdown"><button class="btn btn-small">⋮</button><div class="dropdown-content">
             <a href="/admin/impersonate/{p['id']}"><i class="fas fa-user-secret"></i> Impersonate</a>
             <a href="/admin/extend/{p['id']}"><i class="fas fa-calendar-plus"></i> Extend</a>
             <a href="/admin/edit-provider/{p['id']}"><i class="fas fa-edit"></i> Edit</a>
@@ -905,7 +1461,6 @@ def super_admin_dashboard():
             <a href="/admin/delete-provider/{p['id']}" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
         </div></div></td></tr>'''
 
-    # Audit log (last 20 actions)
     audit = db.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 20").fetchall()
     audit_rows = ''.join(f'<tr><td>{a["created_at"][:16]}</td><td>{a["action"]}</td><td>{a["details"]}</td></tr>' for a in audit) or '<tr><td colspan="3">No activity yet.</td></tr>'
 
@@ -928,8 +1483,7 @@ def super_admin_dashboard():
 def add_provider():
     if not session.get('super_admin'): return redirect('/admin')
     if request.method == 'POST':
-        db = get_db()
-        hashed = generate_password_hash(request.form['password'])
+        db = get_db(); hashed = generate_password_hash(request.form['password'])
         db.execute("INSERT INTO providers (business_name,contact,password_hash,subscription_expiry,is_active,mtn_number,airtel_number,support_phone) VALUES (?,?,?,?,1,?,?,?)",
                    (request.form['business_name'], request.form['contact'], hashed, request.form['expiry'], request.form['mtn'], request.form['airtel'], request.form['support']))
         new_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -937,8 +1491,7 @@ def add_provider():
             db.execute("INSERT INTO plans (provider_id, name, duration_minutes, price_ugx, is_public) VALUES (?,?,?,?,1)",(new_id, name, mins, price))
         db.execute("INSERT INTO settings (provider_id, key, value) VALUES (?,'auto_approve','1')",(new_id,))
         db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'add_provider',?)",(f"Added provider: {request.form['business_name']}",))
-        db.commit()
-        return redirect('/admin/dashboard')
+        db.commit(); return redirect('/admin/dashboard')
     return render_page("Add Provider",'''<div class="card"><div class="card-header">Add New Provider</div>
     <form method="POST"><label>Business Name*</label><input type="text" name="business_name" required><label>Contact Phone*</label><input type="tel" name="contact" required><label>Login Password*</label><input type="password" name="password" required><label>Subscription Expiry*</label><input type="date" name="expiry" required><label>MTN Number</label><input type="text" name="mtn"><label>Airtel Number</label><input type="text" name="airtel"><label>Support WhatsApp</label><input type="text" name="support"><button type="submit" class="btn" style="margin-top:20px;">Create Provider</button></form></div>''', 0, admin=False)
 
@@ -980,8 +1533,7 @@ def admin_invoice(pid):
     if not prov: return redirect('/admin/dashboard')
     if request.method == 'POST':
         inv_no = f"INV-{datetime.now().strftime('%Y%m')}-{random.randint(1000,9999)}"
-        db.execute("INSERT INTO invoices (provider_id, invoice_no, user_id, amount, status, due_date) VALUES (?,?,?,?,'pending',?)",
-                   (pid, inv_no, request.form.get('user_id',0), float(request.form['amount']), request.form['due_date']))
+        db.execute("INSERT INTO invoices (provider_id, invoice_no, user_id, amount, status, due_date) VALUES (?,?,?,?,'pending',?)",(pid, inv_no, request.form.get('user_id',0), float(request.form['amount']), request.form['due_date']))
         db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'send_invoice',?)",(f"Invoice {inv_no} for {prov['business_name']} - UGX {request.form['amount']}",))
         db.commit(); return redirect('/admin/dashboard')
     return render_page("Send Invoice",f'''<div class="card"><div class="card-header">Send Invoice to {prov["business_name"]}</div>
@@ -1006,8 +1558,7 @@ def impersonate(pid):
     if prov:
         session['provider_id'] = prov['id']; session['provider_name'] = prov['business_name']
         db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'impersonate',?)",(f"Impersonated {prov['business_name']}",))
-        db.commit()
-        return redirect('/dashboard')
+        db.commit(); return redirect('/dashboard')
     return redirect('/admin/dashboard')
 
 @app.route('/admin/toggle-provider/<int:pid>')
@@ -1026,15 +1577,9 @@ def delete_provider(pid):
     if not session.get('super_admin'): return redirect('/admin')
     if pid == 1: return "Cannot delete the main admin provider.", 403
     db = get_db(); prov = db.execute("SELECT business_name FROM providers WHERE id=?",(pid,)).fetchone()
-    db.execute("DELETE FROM providers WHERE id=?",(pid,))
-    db.execute("DELETE FROM plans WHERE provider_id=?",(pid,))
-    db.execute("DELETE FROM vouchers WHERE provider_id=?",(pid,))
-    db.execute("DELETE FROM voucher_requests WHERE provider_id=?",(pid,))
-    db.execute("DELETE FROM subscribers WHERE provider_id=?",(pid,))
-    db.execute("DELETE FROM settings WHERE provider_id=?",(pid,))
+    db.execute("DELETE FROM providers WHERE id=?",(pid,)); db.execute("DELETE FROM plans WHERE provider_id=?",(pid,)); db.execute("DELETE FROM vouchers WHERE provider_id=?",(pid,)); db.execute("DELETE FROM voucher_requests WHERE provider_id=?",(pid,)); db.execute("DELETE FROM subscribers WHERE provider_id=?",(pid,)); db.execute("DELETE FROM settings WHERE provider_id=?",(pid,))
     db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'delete_provider',?)",(f"Deleted provider: {prov['business_name']}",))
-    db.commit()
-    return redirect('/admin/dashboard')
+    db.commit(); return redirect('/admin/dashboard')
 
 @app.route('/admin/logout')
 def super_admin_logout():
@@ -1048,6 +1593,6 @@ def backup_route():
 
 # ------------------------------------------------------------
 init_db()
-backup_database()  # Backup on startup
+backup_database()
 if __name__ == '__main__':
     app.run()
