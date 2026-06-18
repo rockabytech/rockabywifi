@@ -306,15 +306,15 @@ base_template = """
         }
         .hamburger { font-size:1.5rem; cursor:pointer; background:none; border:none; color:var(--text); display:block; }
         .topbar-right { display:flex; align-items:center; gap:18px; position:relative; }
-        .settings-dropdown { position:relative; display:inline-block; }
+        .settings-dropdown { position:relative; z-index:1000; overflow:visible; }
         .settings-dropdown-content {
             display:none; position:absolute; right:0; top:100%; background:var(--card-bg);
-            backdrop-filter: blur(20px); min-width:180px; box-shadow:var(--shadow); z-index:10;
-            border-radius:12px; overflow:hidden; border:1px solid var(--glass-border);
+            backdrop-filter: blur(20px); min-width:180px; box-shadow:var(--shadow); z-index:9999;
+            border-radius:12px; overflow:visible; border:1px solid var(--glass-border);
         }
+        .settings-dropdown:hover .settings-dropdown-content { display:block; }
         .settings-dropdown-content a { color:var(--text); padding:12px 18px; text-decoration:none; display:block; }
         .settings-dropdown-content a:hover { background:rgba(26,115,232,0.1); }
-        .settings-dropdown:hover .settings-dropdown-content { display:block; }
         .theme-toggle { background:rgba(26,115,232,0.1); border:1px solid var(--glass-border); border-radius:50%; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1.2rem; transition:all 0.2s; color:var(--text); }
         .theme-toggle:hover { background:rgba(26,115,232,0.2); transform:scale(1.05); }
         .container { max-width:1400px; margin:24px auto; padding:0 20px; }
@@ -323,6 +323,7 @@ base_template = """
             border-radius:var(--radius); padding:28px; margin-bottom:20px;
             box-shadow:var(--shadow); border:1px solid var(--glass-border);
             transition: transform 0.2s, box-shadow 0.2s, background 0.3s, border 0.3s;
+            overflow:visible; /* Ensure dropdowns can overflow outside cards */
         }
         .card:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(0,0,0,0.12); }
         .card-header {
@@ -380,12 +381,12 @@ base_template = """
         .remember-row { display:flex; align-items:center; margin-top:15px; }
         .remember-row input[type="checkbox"] { width:auto; margin-right:8px; }
         .copy-btn { background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-left: 10px; }
-        .dropdown { position:relative; display:inline-block; z-index:100; }
+        .dropdown { position:relative; display:inline-block; z-index:1000; overflow:visible; }
         .dropdown-content {
             display:none; position:absolute; right:0; top:100%; background:var(--card-bg);
             backdrop-filter: blur(20px); min-width:220px;
-            box-shadow:0 12px 40px rgba(0,0,0,0.25); z-index:200; border-radius:12px;
-            overflow:hidden; border:1px solid var(--glass-border);
+            box-shadow:0 12px 40px rgba(0,0,0,0.25); z-index:9999; border-radius:12px;
+            overflow:visible; border:1px solid var(--glass-border);
         }
         .dropdown-content a { color:var(--text); padding:12px 18px; text-decoration:none; display:block; }
         .dropdown-content a:hover { background:rgba(26,115,232,0.1); }
