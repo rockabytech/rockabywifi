@@ -1,7 +1,7 @@
 import os, sqlite3, re, random, string, math, requests, json, shutil
 from datetime import date, timedelta, datetime
 from collections import defaultdict
-from flask import Flask, render_template_string, request, redirect, url_for, session, g
+from flask import Flask, render_template_string, request, redirect, url_for, session, g, make_response, send_file, send_from_directory
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from functools import wraps
@@ -13,14 +13,25 @@ try:
 except ImportError:
     HAS_MT = False
 
+# ============================================================
+# APP CONFIGURATION (Dynamic paths for Render)
+# ============================================================
 app = Flask(__name__)
 app.secret_key = 'rockabywifi-secret-key-change-in-production'
 app.permanent_session_lifetime = timedelta(days=30)
 
+# Dynamic paths
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'rockabywifi.db')
+
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-UPLOAD_FOLDER = os.path.join(os.getcwd(), 'static', 'uploads')
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Backup directory
+BACKUP_DIR = os.path.join(BASE_DIR, 'backups')
+os.makedirs(BACKUP_DIR, exist_ok=True)
 
 MIKROTIK_HOST = '192.168.1.1'
 MIKROTIK_USER = 'admin'
@@ -49,10 +60,8 @@ def mt_remove_user(username):
     except: return False
 
 # ------------------------------------------------------------
-# DATABASE
+# DATABASE INITIALIZATION (updated with dynamic DB_PATH)
 # ------------------------------------------------------------
-DB_PATH = 'rockabywifi.db'
-
 def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect(DB_PATH)
@@ -128,9 +137,8 @@ def init_db():
     conn.close()
 
 def backup_database():
-    backup_dir = 'backups'
-    os.makedirs(backup_dir, exist_ok=True)
-    backup_file = os.path.join(backup_dir, f"rockabywifi_backup_{date.today().isoformat()}.db")
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    backup_file = os.path.join(BACKUP_DIR, f"rockabywifi_backup_{date.today().isoformat()}.db")
     if not os.path.exists(backup_file):
         shutil.copy2(DB_PATH, backup_file)
 
@@ -140,7 +148,8 @@ def backup_database():
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if 'provider_id' not in session and 'subscriber_id' not in session: return redirect(url_for('login'))
+        if 'provider_id' not in session and 'subscriber_id' not in session:
+            return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated
 
@@ -226,6 +235,9 @@ def yo_charge(phone, amount, plan_name, provider):
     except Exception as e: print(f"Yo! Payments error: {e}")
     return None
 
+# ------------------------------------------------------------
+# BASE TEMPLATE – Glassmorphism + Dark Mode
+# ------------------------------------------------------------
 base_template = """
 <!DOCTYPE html>
 <html lang="en">
@@ -233,48 +245,52 @@ base_template = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RockabyWiFi - {title}</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#1a73e8">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         :root {
             --primary: #1a73e8; --primary-dark: #1557b0; --accent: #ff6b6b; --accent2: #51cf66; --accent3: #ffd43b;
-            --bg: #f0f4f8; --card-bg: rgba(255,255,255,0.9); --glass-border: rgba(255,255,255,0.3);
+            --bg: #f0f4f8; --card-bg: rgba(255,255,255,0.85); --glass-border: rgba(255,255,255,0.3);
             --text: #1a1a1a; --text-secondary: #666666; --border: #e0e0e0;
             --radius: 16px; --shadow: 0 8px 32px rgba(0,0,0,0.08); --sidebar-width: 260px;
         }
         .dark-mode {
-            --bg: #0f172a; --card-bg: rgba(30,41,59,0.9); --glass-border: rgba(255,255,255,0.08);
+            --bg: #0f172a; --card-bg: rgba(30,41,59,0.85); --glass-border: rgba(255,255,255,0.08);
             --text: #f1f5f9; --text-secondary: #94a3b8; --border: #334155;
+            --shadow: 0 8px 32px rgba(0,0,0,0.3);
         }
         * { margin:0; padding:0; box-sizing:border-box; }
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
-            background-image: radial-gradient(circle at 10% 20%, rgba(26,115,232,0.05) 0%, transparent 50%),
-                              radial-gradient(circle at 90% 80%, rgba(255,107,107,0.05) 0%, transparent 50%);
+            background-image: radial-gradient(circle at 10% 20%, rgba(26,115,232,0.08) 0%, transparent 50%),
+                              radial-gradient(circle at 90% 80%, rgba(255,107,107,0.08) 0%, transparent 50%);
             color: var(--text); min-height:100vh;
+            transition: all 0.3s;
         }
         .admin-layout { display: flex; }
         .sidebar {
-            width: var(--sidebar-width); background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
-            color: #fff; height: 100vh; position: fixed; left:0; top:0; overflow-y:auto;
-            transition: transform 0.3s; z-index:1000; box-shadow: 4px 0 20px rgba(0,0,0,0.3);
+            width: var(--sidebar-width); background: var(--card-bg); backdrop-filter: blur(20px);
+            border-right: 1px solid var(--glass-border); height: 100vh; position: fixed; left:0; top:0; overflow-y:auto;
+            transition: transform 0.3s, background 0.3s; z-index:1000; box-shadow: var(--shadow);
         }
         .sidebar.collapsed { transform: translateX(-100%); }
         .sidebar-header {
-            padding: 24px 20px; border-bottom:1px solid rgba(255,255,255,0.1);
+            padding: 24px 20px; border-bottom:1px solid var(--glass-border);
             display:flex; align-items:center; gap:12px;
-            background: linear-gradient(135deg, rgba(26,115,232,0.3), rgba(255,107,107,0.2));
+            background: linear-gradient(135deg, rgba(26,115,232,0.2), rgba(255,107,107,0.1));
         }
         .sidebar-header img { height:40px; width:40px; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.3); }
         .sidebar-header h3 { font-size:1.2rem; font-weight:700; letter-spacing:0.5px; }
         .sidebar-menu { padding:10px 0; }
         .sidebar-menu a {
-            display:flex; align-items:center; gap:10px; padding:12px 24px; color:#cbd5e1;
+            display:flex; align-items:center; gap:10px; padding:12px 24px; color:var(--text-secondary);
             text-decoration:none; transition:all 0.2s; font-size:0.9rem; border-left:3px solid transparent;
         }
         .sidebar-menu a:hover, .sidebar-menu a.active {
-            background:rgba(255,255,255,0.08); color:#fff; border-left-color: var(--primary);
+            background:rgba(26,115,232,0.08); color:var(--primary); border-left-color: var(--primary);
         }
         .sidebar-menu .badge {
             background: linear-gradient(135deg, var(--primary), #6366f1);
@@ -286,25 +302,27 @@ base_template = """
             background: var(--card-bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
             border-bottom:1px solid var(--glass-border); padding:14px 24px;
             display:flex; align-items:center; justify-content:space-between;
+            transition: background 0.3s, border 0.3s;
         }
         .hamburger { font-size:1.5rem; cursor:pointer; background:none; border:none; color:var(--text); display:block; }
         .topbar-right { display:flex; align-items:center; gap:18px; position:relative; }
         .settings-dropdown { position:relative; display:inline-block; }
         .settings-dropdown-content {
             display:none; position:absolute; right:0; top:100%; background:var(--card-bg);
-            backdrop-filter: blur(20px); min-width:180px; box-shadow:0 12px 40px rgba(0,0,0,0.2);
-            z-index:10; border-radius:12px; overflow:hidden; border:1px solid var(--glass-border);
+            backdrop-filter: blur(20px); min-width:180px; box-shadow:var(--shadow); z-index:10;
+            border-radius:12px; overflow:hidden; border:1px solid var(--glass-border);
         }
         .settings-dropdown-content a { color:var(--text); padding:12px 18px; text-decoration:none; display:block; }
         .settings-dropdown-content a:hover { background:rgba(26,115,232,0.1); }
         .settings-dropdown:hover .settings-dropdown-content { display:block; }
-        .theme-toggle { background:none; border:none; color:var(--text); font-size:1.3rem; cursor:pointer; }
+        .theme-toggle { background:rgba(26,115,232,0.1); border:1px solid var(--glass-border); border-radius:50%; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1.2rem; transition:all 0.2s; color:var(--text); }
+        .theme-toggle:hover { background:rgba(26,115,232,0.2); transform:scale(1.05); }
         .container { max-width:1400px; margin:24px auto; padding:0 20px; }
         .card {
             background: var(--card-bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
             border-radius:var(--radius); padding:28px; margin-bottom:20px;
             box-shadow:var(--shadow); border:1px solid var(--glass-border);
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: transform 0.2s, box-shadow 0.2s, background 0.3s, border 0.3s;
         }
         .card:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(0,0,0,0.12); }
         .card-header {
@@ -317,6 +335,7 @@ base_template = """
             background: linear-gradient(135deg, rgba(26,115,232,0.08), rgba(99,102,241,0.05));
             border-radius:var(--radius); padding:24px; box-shadow:var(--shadow);
             border:1px solid var(--glass-border); text-align:center; position:relative; overflow:hidden;
+            transition: background 0.3s, border 0.3s;
         }
         .stat-card::before {
             content:''; position:absolute; top:-30px; right:-30px; width:80px; height:80px;
@@ -371,7 +390,7 @@ base_template = """
         .dropdown-content a { color:var(--text); padding:12px 18px; text-decoration:none; display:block; }
         .dropdown-content a:hover { background:rgba(26,115,232,0.1); }
         .dropdown:hover .dropdown-content { display:block; }
-        footer { text-align:center; padding:24px; color:var(--text-secondary); }
+        footer { text-align:center; padding:24px; color:var(--text-secondary); border-top:1px solid var(--border); margin-top:40px; }
         table { width:100%; border-collapse:collapse; }
         th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border); }
         th { background:var(--bg); font-weight:600; }
@@ -383,6 +402,18 @@ base_template = """
         .alert { padding:12px 18px; border-radius:8px; margin-bottom:15px; }
         .alert-success { background:rgba(40,167,69,0.15); color:#155724; border:1px solid rgba(40,167,69,0.3); }
         .alert-error { background:rgba(220,53,69,0.15); color:#721c24; border:1px solid rgba(220,53,69,0.3); }
+        .install-btn {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            display: none;
+            font-weight: 600;
+        }
+        .install-btn:hover { transform: scale(1.05); }
         @media (max-width:768px) {
             .sidebar { transform:translateX(-100%); } .sidebar.open { transform:translateX(0); }
             .main-content { margin-left:0; } .chart-row { flex-direction:column; }
@@ -406,14 +437,47 @@ base_template = """
         }
         function toggleTheme() {
             document.body.classList.toggle('dark-mode');
-            localStorage.setItem('theme', document.body.classList.contains('dark-mode') ? 'dark' : 'light');
+            localStorage.setItem('rockabywifi-theme', document.body.classList.contains('dark-mode') ? 'dark' : 'light');
         }
-        if (localStorage.getItem('theme') === 'dark') { document.body.classList.add('dark-mode'); }
+        if (localStorage.getItem('rockabywifi-theme') === 'dark') {
+            document.body.classList.add('dark-mode');
+        }
+        // PWA install prompt
+        let deferredPrompt;
+        const installBtn = document.getElementById('installBtn');
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            if (installBtn) installBtn.style.display = 'inline-block';
+        });
+        if (installBtn) {
+            installBtn.addEventListener('click', async () => {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    deferredPrompt = null;
+                    installBtn.style.display = 'none';
+                }
+            });
+        }
+        window.addEventListener('appinstalled', () => {
+            if (installBtn) installBtn.style.display = 'none';
+        });
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(() => console.log('Service Worker registered'))
+                    .catch(err => console.log('Service Worker failed:', err));
+            });
+        }
     </script>
 </body>
 </html>
 """
 
+# ------------------------------------------------------------
+# RENDER_PAGE FUNCTION (uses base_template)
+# ------------------------------------------------------------
 def render_page(title, content, pending_count=0, provider_id=1, admin=False):
     provider = get_provider(provider_id)
     sp = provider['support_phone'] if provider and provider['support_phone'] else '256751318876'
@@ -470,7 +534,15 @@ def home():
     bn = p['business_name'] if p else 'RockabyWiFi'
     logo = f'<img src="/static/uploads/{p["logo_image"]}" class="provider-logo" alt="{bn}">' if p and p['logo_image'] else ''
     poster = f'<img src="/static/uploads/{p["poster_image"]}" class="provider-poster" alt="Poster">' if p and p['poster_image'] else ''
-    content = f'''<div class="card" style="display:flex;align-items:center;">{logo}<h2 style="margin:0;">{bn}</h2></div>{poster}
+
+    # Add ug-06.png to hero (public home page)
+    hero_logo = '<img src="/static/ug-06.png" alt="RockabyWiFi" style="height:80px; width:80px; border-radius:16px; object-fit:cover; margin-bottom:15px; box-shadow:0 4px 15px rgba(0,0,0,0.2);">'
+    content = f'''<div class="card" style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">{logo}<h2 style="margin:0;">{bn}</h2></div>{poster}
+    <div class="hero" style="background: linear-gradient(135deg, rgba(26,115,232,0.15), rgba(99,102,241,0.1)); border-radius:var(--radius); padding:40px; text-align:center; margin-bottom:30px; border:1px solid var(--glass-border);">
+        {hero_logo}
+        <h1 style="font-size:2.5rem; margin-bottom:15px; background:linear-gradient(135deg, var(--primary), #6366f1); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Fast & Reliable WiFi</h1>
+        <p style="font-size:1.1rem; color:var(--text-secondary); margin-bottom:20px;">Choose a plan and get connected in minutes.</p>
+    </div>
     <div class="card"><div class="card-header">Choose a Plan</div>
     <form method="GET" action="/sms-verify"><input type="hidden" name="pid" value="{pid}"><label>Your Phone Number *</label><input type="tel" name="phone" required><label>Select Plan</label><select name="plan_id" required>{get_plan_options(pid)}</select><button type="submit" class="btn" style="margin-top:20px;width:100%;">Continue to Payment</button></form></div>
     <p style="text-align:center;margin-top:15px;"><a href="/redeem?pid={pid}" class="btn btn-outline">Already have a voucher?</a> <a href="/subscriber-login?pid={pid}" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a></p>
@@ -594,7 +666,7 @@ def subscriber_logout():
     return redirect('/')
 
 # ------------------------------------------------------------
-# ADMIN LOGIN
+# ADMIN LOGIN (unchanged)
 # ------------------------------------------------------------
 @app.route('/login', methods=['GET','POST'])
 def login():
@@ -612,7 +684,7 @@ def login():
 def logout(): session.clear(); return redirect('/')
 
 # ------------------------------------------------------------
-# PROVIDER DASHBOARD (Fancy Charts)
+# PROVIDER DASHBOARD (unchanged, but uses new styles)
 # ------------------------------------------------------------
 @app.route('/dashboard')
 @login_required
@@ -652,7 +724,9 @@ def dashboard():
     </script>"""
     return render_page("Dashboard", content, get_pending_count(pid), pid, admin=True)
 
-# API endpoints (all use provider_id from session)
+# ------------------------------------------------------------
+# API ENDPOINTS (unchanged)
+# ------------------------------------------------------------
 @app.route('/api/payments')
 @login_required
 def api_payments():
@@ -1586,13 +1660,159 @@ def super_admin_logout():
     session.pop('super_admin', None)
     return redirect('/admin')
 
-@app.route('/backup')
-def backup_route():
-    backup_database()
-    return "Database backup created successfully."
+# ------------------------------------------------------------
+# PWA ROUTES
+# ------------------------------------------------------------
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory(BASE_DIR, 'manifest.json', mimetype='application/json')
 
+@app.route('/service-worker.js')
+def service_worker():
+    return send_from_directory(BASE_DIR, 'service-worker.js', mimetype='application/javascript')
+
+# ------------------------------------------------------------
+# ADMIN BACKUP AND RESTORE ROUTES
+# ------------------------------------------------------------
+@app.route('/admin/backup')
+def admin_backup():
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    try:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_filename = f"rockabywifi_backup_{timestamp}.db"
+        backup_path = os.path.join(BACKUP_DIR, backup_filename)
+        shutil.copy2(DB_PATH, backup_path)
+        content = f'''<div class="card" style="text-align:center;">
+            <div class="card-header">✅ Backup Created</div>
+            <p>File: <strong>{backup_filename}</strong></p>
+            <a href="/admin/download-backup/{backup_filename}" class="btn">Download</a>
+            <a href="/admin/backups" class="btn btn-outline">View All Backups</a>
+        </div>'''
+        return render_page("Backup Created", content, 0, admin=False)
+    except Exception as e:
+        return f"Backup failed: {e}", 500
+
+@app.route('/admin/backups')
+def admin_backups():
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    backups = []
+    for f in os.listdir(BACKUP_DIR):
+        if f.endswith('.db'):
+            stat = os.stat(os.path.join(BACKUP_DIR, f))
+            backups.append({
+                'name': f,
+                'size': stat.st_size,
+                'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            })
+    backups.sort(key=lambda x: x['modified'], reverse=True)
+    rows = ""
+    for b in backups:
+        rows += f"""
+        <tr>
+            <td>{b['name']}</td>
+            <td>{b['modified']}</td>
+            <td>{b['size'] // 1024} KB</td>
+            <td><a href="/admin/download-backup/{b['name']}" class="btn btn-small">Download</a></td>
+        </tr>"""
+    if not rows:
+        rows = "<tr><td colspan='4'>No backups found.</td></tr>"
+    content = f"""
+    <div class="card">
+        <div class="card-header">💾 Database Backups</div>
+        <a href="/admin/backup" class="btn" style="margin-bottom:20px;">Create New Backup</a>
+        <a href="/admin/download-current-db" class="btn btn-outline" style="margin-bottom:20px; margin-left:10px;">Download Current DB</a>
+        <a href="/admin/restore" class="btn btn-success" style="margin-bottom:20px; margin-left:10px;">📤 Restore from Backup</a>
+        <table>
+            <thead>
+                <tr><th>Filename</th><th>Modified</th><th>Size</th><th>Action</th></tr>
+            </thead>
+            <tbody>{rows}</tbody>
+        </table>
+        <div style="margin-top:20px;">
+            <a href="/admin/dashboard" class="btn btn-outline">Back to Super Admin</a>
+        </div>
+    </div>
+    """
+    return render_page("Backups", content, 0, admin=False)
+
+@app.route('/admin/download-backup/<filename>')
+def admin_download_backup(filename):
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    if '..' in filename or '/' in filename:
+        return "Invalid filename", 400
+    backup_path = os.path.join(BACKUP_DIR, filename)
+    if not os.path.exists(backup_path):
+        return "Backup not found", 404
+    return send_file(backup_path, as_attachment=True, download_name=filename)
+
+@app.route('/admin/download-current-db')
+def admin_download_current_db():
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    if not os.path.exists(DB_PATH):
+        return "Database not found", 404
+    return send_file(DB_PATH, as_attachment=True, download_name='rockabywifi_current.db')
+
+@app.route('/admin/restore', methods=['GET','POST'])
+def admin_restore():
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    if request.method == 'POST':
+        if 'backup_file' not in request.files:
+            return render_page("Restore", '<div class="card"><div class="alert alert-error">No file uploaded.</div><a href="/admin/restore" class="btn">Try again</a></div>', 0, admin=False)
+        file = request.files['backup_file']
+        if file.filename == '':
+            return render_page("Restore", '<div class="card"><div class="alert alert-error">No file selected.</div><a href="/admin/restore" class="btn">Try again</a></div>', 0, admin=False)
+        temp_path = '/tmp/restore_temp.db'
+        file.save(temp_path)
+        try:
+            test_conn = sqlite3.connect(temp_path)
+            test_conn.execute("SELECT 1")
+            test_conn.close()
+        except Exception as e:
+            return render_page("Restore", f'<div class="card"><div class="alert alert-error">Invalid database file: {e}</div><a href="/admin/restore" class="btn">Try again</a></div>', 0, admin=False)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_before_restore = os.path.join(BACKUP_DIR, f"pre_restore_{timestamp}.db")
+        if os.path.exists(DB_PATH):
+            shutil.copy2(DB_PATH, backup_before_restore)
+        shutil.copy2(temp_path, DB_PATH)
+        os.remove(temp_path)
+        content = f"""
+        <div class="card" style="text-align:center;">
+            <div class="card-header">✅ Database Restored</div>
+            <p>The database has been replaced with the uploaded backup.</p>
+            <p>A backup of the previous database was saved as: <strong>pre_restore_{timestamp}.db</strong></p>
+            <a href="/admin/backups" class="btn">View Backups</a>
+            <a href="/admin/dashboard" class="btn btn-outline">Back to Super Admin</a>
+        </div>
+        """
+        return render_page("Restore Complete", content, 0, admin=False)
+    content = """
+    <div class="card">
+        <div class="card-header">⬆️ Restore Database from Backup</div>
+        <div class="alert alert-error" style="background:rgba(255,193,7,0.15); border-color:rgba(255,193,7,0.3); color:#856404;">
+            <strong>⚠️ Warning:</strong> This will overwrite your current database. The current database will be backed up automatically before restoration.
+        </div>
+        <form method="POST" enctype="multipart/form-data">
+            <label>Select a backup file (.db)</label>
+            <input type="file" name="backup_file" accept=".db" required>
+            <button type="submit" class="btn" style="margin-top:20px;">Restore Database</button>
+        </form>
+        <div style="margin-top:20px;">
+            <a href="/admin/backups" class="btn btn-outline">Back to Backups</a>
+        </div>
+    </div>
+    """
+    return render_page("Restore Database", content, 0, admin=False)
+
+# ------------------------------------------------------------
+# RUN APP
 # ------------------------------------------------------------
 init_db()
 backup_database()
+
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0', port=5000, debug=True)
