@@ -323,7 +323,7 @@ base_template = """
             border-radius:var(--radius); padding:28px; margin-bottom:20px;
             box-shadow:var(--shadow); border:1px solid var(--glass-border);
             transition: transform 0.2s, box-shadow 0.2s, background 0.3s, border 0.3s;
-            overflow:visible; /* Ensure dropdowns can overflow outside cards */
+            overflow:visible;
         }
         .card:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(0,0,0,0.12); }
         .card-header {
@@ -381,13 +381,9 @@ base_template = """
         .remember-row { display:flex; align-items:center; margin-top:15px; }
         .remember-row input[type="checkbox"] { width:auto; margin-right:8px; }
         .copy-btn { background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-left: 10px; }
-        /* ---------- DROPDOWN FIX ---------- */
-        .card, .container, .main-content {
+        /* ---------- DROPDOWN FIX (CSS Fallback) ---------- */
+        .card, .container, .main-content, .table-responsive, table, thead, tbody, tr, td, th {
             overflow: visible !important;
-        }
-        .table-responsive, table, thead, tbody, tr, td, th {
-            overflow: visible !important;
-            position: relative;
         }
         .dropdown {
             position: relative !important;
@@ -396,7 +392,6 @@ base_template = """
             z-index: 1000 !important;
         }
         .dropdown-content {
-            display: none;
             position: absolute !important;
             right: 0 !important;
             top: 100% !important;
@@ -404,37 +399,22 @@ base_template = """
             overflow: visible !important;
             background: var(--card-bg) !important;
             backdrop-filter: blur(20px) !important;
-            min-width: 220px !important;
+            min-width: 200px !important;
             box-shadow: 0 12px 40px rgba(0,0,0,0.25) !important;
             border-radius: 12px !important;
             border: 1px solid var(--glass-border) !important;
-        }
-        .dropdown:hover .dropdown-content {
-            display: block !important;
+            padding: 5px 0 !important;
         }
         .dropdown-content a {
             display: block !important;
-            padding: 12px 18px !important;
+            padding: 10px 18px !important;
             color: var(--text) !important;
             text-decoration: none !important;
             white-space: nowrap !important;
+            font-size: 0.9rem !important;
         }
         .dropdown-content a:hover {
             background: rgba(26,115,232,0.1) !important;
-        }
-        /* Topbar settings dropdown */
-        .settings-dropdown-content {
-            position: absolute !important;
-            right: 0 !important;
-            top: 100% !important;
-            z-index: 999999 !important;
-            overflow: visible !important;
-            background: var(--card-bg) !important;
-            backdrop-filter: blur(20px) !important;
-            min-width: 180px !important;
-            box-shadow: var(--shadow) !important;
-            border-radius: 12px !important;
-            border: 1px solid var(--glass-border) !important;
         }
         /* ---------- END DROPDOWN FIX ---------- */
         footer { text-align:center; padding:24px; color:var(--text-secondary); border-top:1px solid var(--border); margin-top:40px; }
@@ -489,7 +469,39 @@ base_template = """
         if (localStorage.getItem('rockabywifi-theme') === 'dark') {
             document.body.classList.add('dark-mode');
         }
-        // PWA install prompt
+
+        // ============================================================
+        // DROPDOWN TOGGLE (Fixes the 3-dots menu issue)
+        // ============================================================
+        function toggleDropdown(btn) {
+            var dropdown = btn.closest('.dropdown');
+            if (!dropdown) return;
+            var content = dropdown.querySelector('.dropdown-content');
+            if (!content) return;
+            // Close all other open dropdowns
+            document.querySelectorAll('.dropdown-content').forEach(function(el) {
+                if (el !== content) el.style.display = 'none';
+            });
+            // Toggle this one
+            if (content.style.display === 'block') {
+                content.style.display = 'none';
+            } else {
+                content.style.display = 'block';
+            }
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.dropdown')) {
+                document.querySelectorAll('.dropdown-content').forEach(function(el) {
+                    el.style.display = 'none';
+                });
+            }
+        });
+
+        // ============================================================
+        // PWA INSTALL PROMPT
+        // ============================================================
         let deferredPrompt;
         const installBtn = document.getElementById('installBtn');
         window.addEventListener('beforeinstallprompt', (e) => {
@@ -510,6 +522,10 @@ base_template = """
         window.addEventListener('appinstalled', () => {
             if (installBtn) installBtn.style.display = 'none';
         });
+
+        // ============================================================
+        // SERVICE WORKER
+        // ============================================================
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/service-worker.js')
@@ -905,9 +921,9 @@ def active_users():
     subs = db.execute("SELECT s.id as sid, sub.username, sub.phone, s.ip_address, s.started_at FROM sessions s JOIN subscribers sub ON s.subscriber_id=sub.id WHERE s.provider_id=?",(pid,)).fetchall()
     rows = ''
     for v in vouchers:
-        rows += f'<tr><td>{v["code"]}</td><td>{v["phone_number"]}</td><td>Hotspot</td><td>{v["pn"]}</td><td>{v["created_at"]}</td><td>-</td><td><div class="dropdown"><button class="btn btn-small">⋮</button><div class="dropdown-content"><a href="/disconnect-voucher/{v["id"]}">Disconnect</a><a href="/disconnect-voucher-until-payment/{v["id"]}">Disconnect until payment</a></div></div></td></tr>'
+        rows += f'<tr><td>{v["code"]}</td><td>{v["phone_number"]}</td><td>Hotspot</td><td>{v["pn"]}</td><td>{v["created_at"]}</td><td>-</td><td><div class="dropdown" style="position:relative;display:inline-block;"><button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">⋮</button><div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:150px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;"><a href="/disconnect-voucher/{v["id"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect</a><a href="/disconnect-voucher-until-payment/{v["id"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect until payment</a></div></div></td></tr>'
     for s in subs:
-        rows += f'<tr><td>{s["username"]}</td><td>{s["phone"] or ""}</td><td>PPPoE</td><td>{s["ip_address"]}</td><td>{s["started_at"]}</td><td>-</td><td><div class="dropdown"><button class="btn btn-small">⋮</button><div class="dropdown-content"><a href="/disconnect-subscriber/{s["sid"]}">Disconnect</a><a href="/suspend-subscriber/{s["sid"]}">Disconnect until payment</a></div></div></td></tr>'
+        rows += f'<tr><td>{s["username"]}</td><td>{s["phone"] or ""}</td><td>PPPoE</td><td>{s["ip_address"]}</td><td>{s["started_at"]}</td><td>-</td><td><div class="dropdown" style="position:relative;display:inline-block;"><button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">⋮</button><div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:150px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;"><a href="/disconnect-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect</a><a href="/suspend-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect until payment</a></div></div></td></tr>'
     if not rows: rows = '<tr><td colspan="7">No active users at the moment.</td></tr>'
     content = f'''<div class="card"><div class="card-header">Active Users</div>
     <div class="tabs"><span class="tab active">All <span class="badge">{len(vouchers)+len(subs)}</span></span><span class="tab">Hotspot <span class="badge">{len(vouchers)}</span></span><span class="tab">PPPoE <span class="badge">{len(subs)}</span></span></div>
