@@ -309,7 +309,7 @@ base_template = """
         .settings-dropdown { position:relative; z-index:1000; overflow:visible; }
         .settings-dropdown-content {
             display:none; position:absolute; right:0; top:100%; background:var(--card-bg);
-            backdrop-filter: blur(20px); min-width:180px; box-shadow:var(--shadow); z-index:9999;
+            backdrop-filter: blur(20px); min-width:180px; box-shadow:var(--shadow); z-index:999999;
             border-radius:12px; overflow:visible; border:1px solid var(--glass-border);
         }
         .settings-dropdown:hover .settings-dropdown-content { display:block; }
@@ -381,16 +381,62 @@ base_template = """
         .remember-row { display:flex; align-items:center; margin-top:15px; }
         .remember-row input[type="checkbox"] { width:auto; margin-right:8px; }
         .copy-btn { background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-left: 10px; }
-        .dropdown { position:relative; display:inline-block; z-index:1000; overflow:visible; }
-        .dropdown-content {
-            display:none; position:absolute; right:0; top:100%; background:var(--card-bg);
-            backdrop-filter: blur(20px); min-width:220px;
-            box-shadow:0 12px 40px rgba(0,0,0,0.25); z-index:9999; border-radius:12px;
-            overflow:visible; border:1px solid var(--glass-border);
+        /* ---------- DROPDOWN FIX ---------- */
+        .card, .container, .main-content {
+            overflow: visible !important;
         }
-        .dropdown-content a { color:var(--text); padding:12px 18px; text-decoration:none; display:block; }
-        .dropdown-content a:hover { background:rgba(26,115,232,0.1); }
-        .dropdown:hover .dropdown-content { display:block; }
+        .table-responsive, table, thead, tbody, tr, td, th {
+            overflow: visible !important;
+            position: relative;
+        }
+        .dropdown {
+            position: relative !important;
+            display: inline-block !important;
+            overflow: visible !important;
+            z-index: 1000 !important;
+        }
+        .dropdown-content {
+            display: none;
+            position: absolute !important;
+            right: 0 !important;
+            top: 100% !important;
+            z-index: 999999 !important;
+            overflow: visible !important;
+            background: var(--card-bg) !important;
+            backdrop-filter: blur(20px) !important;
+            min-width: 220px !important;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.25) !important;
+            border-radius: 12px !important;
+            border: 1px solid var(--glass-border) !important;
+        }
+        .dropdown:hover .dropdown-content {
+            display: block !important;
+        }
+        .dropdown-content a {
+            display: block !important;
+            padding: 12px 18px !important;
+            color: var(--text) !important;
+            text-decoration: none !important;
+            white-space: nowrap !important;
+        }
+        .dropdown-content a:hover {
+            background: rgba(26,115,232,0.1) !important;
+        }
+        /* Topbar settings dropdown */
+        .settings-dropdown-content {
+            position: absolute !important;
+            right: 0 !important;
+            top: 100% !important;
+            z-index: 999999 !important;
+            overflow: visible !important;
+            background: var(--card-bg) !important;
+            backdrop-filter: blur(20px) !important;
+            min-width: 180px !important;
+            box-shadow: var(--shadow) !important;
+            border-radius: 12px !important;
+            border: 1px solid var(--glass-border) !important;
+        }
+        /* ---------- END DROPDOWN FIX ---------- */
         footer { text-align:center; padding:24px; color:var(--text-secondary); border-top:1px solid var(--border); margin-top:40px; }
         table { width:100%; border-collapse:collapse; }
         th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border); }
