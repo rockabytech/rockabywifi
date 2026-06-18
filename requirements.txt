@@ -2,3 +2,5 @@ flask
 gunicorn
 werkzeug
 requests
+Pillow
+librouteros
