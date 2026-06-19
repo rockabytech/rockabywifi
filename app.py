@@ -551,14 +551,14 @@ base_template = """
         });
 
         // ============================================================
-        // FIXED DROPDOWN TOGGLE (for super admin dropdown)
+        // SUPER ADMIN DROPDOWN TOGGLE (passes button reference)
         // ============================================================
-        function toggleFixedDropdown(btn, dropdownId) {
+        function toggleSuperDropdown(btn, dropdownId) {
             var content = document.getElementById(dropdownId);
             if (!content) return;
             
-            // Close all other fixed dropdowns
-            document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
+            // Close all other super dropdowns
+            document.querySelectorAll('.super-dropdown-content').forEach(function(el) {
                 if (el.id !== dropdownId) el.style.display = 'none';
             });
             
@@ -566,7 +566,7 @@ base_template = """
             if (content.style.display === 'block') {
                 content.style.display = 'none';
             } else {
-                // Position the fixed dropdown near the button
+                // Position it near the button
                 var rect = btn.getBoundingClientRect();
                 var leftPos = rect.left - 50;
                 if (leftPos < 10) leftPos = 10;
@@ -576,18 +576,18 @@ base_template = """
             }
         }
 
-        // Close fixed dropdowns when clicking outside
+        // Close super dropdowns when clicking outside
         document.addEventListener('click', function(e) {
-            if (!e.target.closest('.dropdown-toggle') && !e.target.closest('.fixed-dropdown-content')) {
-                document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
+            if (!e.target.closest('.super-dropdown-content') && !e.target.closest('.btn-small')) {
+                document.querySelectorAll('.super-dropdown-content').forEach(function(el) {
                     el.style.display = 'none';
                 });
             }
         });
 
-        // Close fixed dropdowns on scroll
+        // Close super dropdowns on scroll
         window.addEventListener('scroll', function() {
-            document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
+            document.querySelectorAll('.super-dropdown-content').forEach(function(el) {
                 el.style.display = 'none';
             });
         });
@@ -625,48 +625,6 @@ base_template = """
                     .then(() => console.log('Service Worker registered'))
                     .catch(err => console.log('Service Worker failed:', err));
             });
-
-            // ============================================================
-// SUPER ADMIN DROPDOWN TOGGLE
-// ============================================================
-function toggleSuperDropdown(dropdownId) {
-    var content = document.getElementById(dropdownId);
-    if (!content) return;
-    
-    // Close all other super dropdowns
-    document.querySelectorAll('.super-dropdown-content').forEach(function(el) {
-        if (el.id !== dropdownId) el.style.display = 'none';
-    });
-    
-    // Toggle this one
-    if (content.style.display === 'block') {
-        content.style.display = 'none';
-    } else {
-        // Position it near the button
-        var btn = event.target;
-        var rect = btn.getBoundingClientRect();
-        var leftPos = rect.left - 50;
-        if (leftPos < 10) leftPos = 10;
-        content.style.left = leftPos + 'px';
-        content.style.top = (rect.bottom + 5) + 'px';
-        content.style.display = 'block';
-    }
-}
-
-// Close super dropdowns when clicking outside
-document.addEventListener('click', function(e) {
-    if (!e.target.closest('.super-dropdown-content') && !e.target.closest('.btn-small')) {
-        document.querySelectorAll('.super-dropdown-content').forEach(function(el) {
-            el.style.display = 'none';
-        });
-    }
-});
-
-// Close super dropdowns on scroll
-window.addEventListener('scroll', function() {
-    document.querySelectorAll('.super-dropdown-content').forEach(function(el) {
-        el.style.display = 'none';
-    });
         }
     </script>
 </body>
@@ -1815,7 +1773,7 @@ def super_admin_dashboard():
             <td>{voucher_count}</td>
             <td>{expiry}</td>
             <td style="overflow:visible; position:relative;">
-                <button class="btn btn-small" onclick="toggleSuperDropdown('{row_id}')">&#8942;</button>
+                <button class="btn btn-small" onclick="toggleSuperDropdown(this, '{row_id}')">&#8942;</button>
                 <div id="{row_id}" class="super-dropdown-content" style="display:none;position:fixed;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.3);z-index:99999999;overflow:visible;padding:5px 0;min-width:200px;">
                     <a href="/admin/impersonate/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
                     <a href="/admin/extend/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
