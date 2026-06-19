@@ -422,22 +422,21 @@ base_template = """
         .remember-row { display:flex; align-items:center; margin-top:15px; }
         .remember-row input[type="checkbox"] { width:auto; margin-right:8px; }
         .copy-btn { background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-left: 10px; }
-        /* ---------- DROPDOWN FIX (CSS Fallback) ---------- */
+        
+        /* ========== DROPDOWN FIX (Hover-based) ========== */
         .card, .container, .main-content, .table-responsive, table, thead, tbody, tr, td, th {
             overflow: visible !important;
         }
         .dropdown {
             position: relative !important;
             display: inline-block !important;
-            overflow: visible !important;
-            z-index: 1000 !important;
+            z-index: 9999 !important;
         }
         .dropdown-content {
+            display: none !important;
             position: absolute !important;
             right: 0 !important;
             top: 100% !important;
-            z-index: 999999 !important;
-            overflow: visible !important;
             background: var(--card-bg) !important;
             backdrop-filter: blur(20px) !important;
             min-width: 200px !important;
@@ -445,6 +444,10 @@ base_template = """
             border-radius: 12px !important;
             border: 1px solid var(--glass-border) !important;
             padding: 5px 0 !important;
+            z-index: 999999 !important;
+        }
+        .dropdown:hover .dropdown-content {
+            display: block !important;
         }
         .dropdown-content a {
             display: block !important;
@@ -452,12 +455,12 @@ base_template = """
             color: var(--text) !important;
             text-decoration: none !important;
             white-space: nowrap !important;
-            font-size: 0.9rem !important;
         }
         .dropdown-content a:hover {
             background: rgba(26,115,232,0.1) !important;
         }
-        /* ---------- END DROPDOWN FIX ---------- */
+        /* ========== END DROPDOWN FIX ========== */
+        
         footer { text-align:center; padding:24px; color:var(--text-secondary); border-top:1px solid var(--border); margin-top:40px; }
         table { width:100%; border-collapse:collapse; }
         th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border); }
@@ -521,80 +524,7 @@ base_template = """
             document.body.classList.add('dark-mode');
         }
 
-        // ============================================================
-        // DROPDOWN TOGGLE (Fixes the 3-dots menu issue)
-        // ============================================================
-        function toggleDropdown(btn) {
-            var dropdown = btn.closest('.dropdown');
-            if (!dropdown) return;
-            var content = dropdown.querySelector('.dropdown-content');
-            if (!content) return;
-            // Close all other open dropdowns
-            document.querySelectorAll('.dropdown-content').forEach(function(el) {
-                if (el !== content) el.style.display = 'none';
-            });
-            // Toggle this one
-            if (content.style.display === 'block') {
-                content.style.display = 'none';
-            } else {
-                content.style.display = 'block';
-            }
-        }
-
-        // Close dropdowns when clicking outside
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('.dropdown')) {
-                document.querySelectorAll('.dropdown-content').forEach(function(el) {
-                    el.style.display = 'none';
-                });
-            }
-        });
-
-        // ============================================================
-        // SUPER ADMIN DROPDOWN TOGGLE (passes button reference)
-        // ============================================================
-        function toggleSuperDropdown(btn, dropdownId) {
-            var content = document.getElementById(dropdownId);
-            if (!content) return;
-            
-            // Close all other super dropdowns
-            document.querySelectorAll('.super-dropdown-content').forEach(function(el) {
-                if (el.id !== dropdownId) el.style.display = 'none';
-            });
-            
-            // Toggle this one
-            if (content.style.display === 'block') {
-                content.style.display = 'none';
-            } else {
-                // Position it near the button
-                var rect = btn.getBoundingClientRect();
-                var leftPos = rect.left - 50;
-                if (leftPos < 10) leftPos = 10;
-                content.style.left = leftPos + 'px';
-                content.style.top = (rect.bottom + 5) + 'px';
-                content.style.display = 'block';
-            }
-        }
-
-        // Close super dropdowns when clicking outside
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('.super-dropdown-content') && !e.target.closest('.btn-small')) {
-                document.querySelectorAll('.super-dropdown-content').forEach(function(el) {
-                    el.style.display = 'none';
-                });
-            }
-        });
-
-        // Close super dropdowns on scroll
-        window.addEventListener('scroll', function() {
-            document.querySelectorAll('.super-dropdown-content').forEach(function(el) {
-                el.style.display = 'none';
-            });
-        });
-
-        // ============================================================
-        // PWA INSTALL PROMPT
-        // ============================================================
+        // PWA install prompt
         let deferredPrompt;
         const installBtn = document.getElementById('installBtn');
         window.addEventListener('beforeinstallprompt', (e) => {
@@ -616,9 +546,7 @@ base_template = """
             if (installBtn) installBtn.style.display = 'none';
         });
 
-        // ============================================================
-        // SERVICE WORKER
-        // ============================================================
+        // Service Worker
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/service-worker.js')
@@ -1036,11 +964,11 @@ def active_users():
             <td>{v["created_at"]}</td>
             <td>-</td>
             <td>
-                <div class="dropdown" style="position:relative;display:inline-block;">
-                    <button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button>
-                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:150px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;">
-                        <a href="/disconnect-voucher/{v["id"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect</a>
-                        <a href="/disconnect-voucher-until-payment/{v["id"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect until payment</a>
+                <div class="dropdown" style="position:relative;display:inline-block;z-index:9999;">
+                    <button class="btn btn-small">&#8942;</button>
+                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;min-width:150px;white-space:nowrap;">
+                        <a href="/disconnect-voucher/{v["id"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;">Disconnect</a>
+                        <a href="/disconnect-voucher-until-payment/{v["id"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;">Disconnect until payment</a>
                     </div>
                 </div>
             </td>
@@ -1057,11 +985,11 @@ def active_users():
             <td>{s["started_at"]}</td>
             <td>-</td>
             <td>
-                <div class="dropdown" style="position:relative;display:inline-block;">
-                    <button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button>
-                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:150px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;">
-                        <a href="/disconnect-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect</a>
-                        <a href="/suspend-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect until payment</a>
+                <div class="dropdown" style="position:relative;display:inline-block;z-index:9999;">
+                    <button class="btn btn-small">&#8942;</button>
+                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;min-width:150px;white-space:nowrap;">
+                        <a href="/disconnect-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;">Disconnect</a>
+                        <a href="/suspend-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;">Disconnect until payment</a>
                     </div>
                 </div>
             </td>
@@ -1079,19 +1007,21 @@ def active_users():
             <span class="tab">Hotspot <span class="badge">{len(vouchers)}</span></span>
             <span class="tab">PPPoE <span class="badge">{len(subs)}</span></span>
         </div>
-        <table>
-            <thead>
-                <tr>
-                    <th>Username</th>
-                    <th>IP/MAC</th>
-                    <th>Router</th>
-                    <th>Session Start</th>
-                    <th>Session End</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>{rows}</tbody>
-        </table>
+        <div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>IP/MAC</th>
+                        <th>Router</th>
+                        <th>Session Start</th>
+                        <th>Session End</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+            </table>
+        </div>
     </div>
     '''
     return render_page("Active Users", content, get_pending_count(pid), pid, admin=True)
@@ -1733,7 +1663,6 @@ def super_admin_dashboard():
     
     db = get_db()
     
-    # Statistics
     total_providers = db.execute("SELECT COUNT(*) as c FROM providers").fetchone()['c']
     active_providers = db.execute("SELECT COUNT(*) as c FROM providers WHERE is_active=1").fetchone()['c']
     total_revenue = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE status='approved'").fetchone()['t']
@@ -1743,7 +1672,6 @@ def super_admin_dashboard():
     today_revenue = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE status='approved' AND date(created_at)=?", (today,)).fetchone()['t']
     pending_approvals = db.execute("SELECT COUNT(*) as c FROM voucher_requests WHERE status='pending'").fetchone()['c']
     
-    # Provider list
     providers = db.execute("SELECT * FROM providers ORDER BY id").fetchall()
     rows = ''
     for p in providers:
@@ -1760,7 +1688,6 @@ def super_admin_dashboard():
             expired = True
         row_class = 'style="background:rgba(255,212,59,0.1);"' if expired else ''
         
-        row_id = f"dropdown_{p['id']}"
         rows += f'''
         <tr {row_class}>
             <td>{p['id']}</td>
@@ -1773,21 +1700,22 @@ def super_admin_dashboard():
             <td>{voucher_count}</td>
             <td>{expiry}</td>
             <td style="overflow:visible; position:relative;">
-                <button class="btn btn-small" onclick="toggleSuperDropdown(this, '{row_id}')">&#8942;</button>
-                <div id="{row_id}" class="super-dropdown-content" style="display:none;position:fixed;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.3);z-index:99999999;overflow:visible;padding:5px 0;min-width:200px;">
-                    <a href="/admin/impersonate/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
-                    <a href="/admin/extend/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
-                    <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-edit"></i> Edit</a>
-                    <a href="/admin/invoice/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
-                    <a href="/admin/message/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-envelope"></i> Message</a>
-                    <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
-                    <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
+                <div class="dropdown" style="position:relative;display:inline-block;z-index:9999;">
+                    <button class="btn btn-small">&#8942;</button>
+                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;min-width:200px;white-space:nowrap;">
+                        <a href="/admin/impersonate/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-user-secret"></i> Impersonate</a>
+                        <a href="/admin/extend/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-calendar-plus"></i> Extend</a>
+                        <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-edit"></i> Edit</a>
+                        <a href="/admin/invoice/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
+                        <a href="/admin/message/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-envelope"></i> Message</a>
+                        <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
+                        <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
+                    </div>
                 </div>
             </td>
         </tr>
         '''
     
-    # Audit log
     audit = db.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 20").fetchall()
     audit_rows = ''.join(f'<tr><td>{a["created_at"][:16]}</td><td>{a["action"]}</td><td>{a["details"]}</td></tr>' for a in audit) or '<tr><td colspan="3">No activity yet.</td></tr>'
     
