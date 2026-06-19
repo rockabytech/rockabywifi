@@ -750,7 +750,7 @@ def subscriber_logout():
     return redirect('/')
 
 # ------------------------------------------------------------
-# ADMIN LOGIN (unchanged)
+# ADMIN LOGIN
 # ------------------------------------------------------------
 @app.route('/login', methods=['GET','POST'])
 def login():
@@ -768,7 +768,7 @@ def login():
 def logout(): session.clear(); return redirect('/')
 
 # ------------------------------------------------------------
-# PROVIDER DASHBOARD (unchanged, but uses new styles)
+# PROVIDER DASHBOARD (Fancy Charts)
 # ------------------------------------------------------------
 @app.route('/dashboard')
 @login_required
@@ -809,7 +809,7 @@ def dashboard():
     return render_page("Dashboard", content, get_pending_count(pid), pid, admin=True)
 
 # ------------------------------------------------------------
-# API ENDPOINTS (unchanged)
+# API ENDPOINTS (all use provider_id from session)
 # ------------------------------------------------------------
 @app.route('/api/payments')
 @login_required
@@ -1160,7 +1160,7 @@ def ip_bindings():
 @app.route('/ip-bindings/add', methods=['GET','POST'])
 @login_required
 def add_ip_binding():
-    pid = session['provider_id']  # Define pid
+    pid = session['provider_id']
     db = get_db()
     
     if request.method == 'POST':
@@ -1200,7 +1200,7 @@ def add_ip_binding():
 @app.route('/ip-bindings/edit/<int:bid>', methods=['GET','POST'])
 @login_required
 def edit_ip_binding(bid):
-    pid = session['provider_id']  # Define pid
+    pid = session['provider_id']
     db = get_db()
     
     if request.method == 'POST':
@@ -1239,6 +1239,10 @@ def edit_ip_binding(bid):
         <button type="submit" class="btn" style="margin-top:20px;">Update</button>
     </form></div>'''
     return render_page("Edit IP Binding", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/ip-bindings/delete/<int:bid>')
+@login_required
+def delete_ip_binding(bid): db = get_db(); db.execute("DELETE FROM ip_bindings WHERE id=? AND provider_id=?",(bid,session['provider_id'])); db.commit(); return redirect('/ip-bindings')
 
 # ------------------------------------------------------------
 # TICKETS
@@ -1457,9 +1461,12 @@ def invoices():
 @app.route('/invoices/add', methods=['GET','POST'])
 @login_required
 def add_invoice():
+    pid = session['provider_id']
     if request.method == 'POST':
         db = get_db(); inv_no = f"INV-{datetime.now().strftime('%Y%m')}-{random.randint(1000,9999)}"
-        db.execute("INSERT INTO invoices (provider_id,invoice_no,user_id,amount,paid_amount,status,due_date) VALUES (?,?,?,?,0,'pending',?)",(session['provider_id'],inv_no,int(request.form['user_id']),float(request.form['amount']),request.form['due_date'])); db.commit()
+        db.execute("INSERT INTO invoices (provider_id,invoice_no,user_id,amount,paid_amount,status,due_date) VALUES (?,?,?,?,0,'pending',?)",
+                   (pid, inv_no, int(request.form['user_id']), float(request.form['amount']), request.form['due_date']))
+        db.commit()
         return redirect('/invoices')
     return render_page("Create Invoice",'''<div class="card"><div class="card-header">Create Invoice</div>
     <form method="POST"><label>User ID*</label><input type="number" name="user_id" required><label>Amount (UGX)*</label><input type="number" name="amount" step="0.01" required><label>Due Date</label><input type="date" name="due_date"><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
@@ -1479,7 +1486,12 @@ def expenses():
 @app.route('/expenses/add', methods=['GET','POST'])
 @login_required
 def add_expense():
-    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO expenses (provider_id,description,amount,category,expense_date,payment_method) VALUES (?,?,?,?,?,?)",(session['provider_id'],request.form['description'],float(request.form['amount']),request.form['type'],request.form['date'],request.form['method'])); db.commit(); return redirect('/expenses')
+    pid = session['provider_id']
+    if request.method == 'POST':
+        db = get_db(); db.execute("INSERT INTO expenses (provider_id,description,amount,category,expense_date,payment_method) VALUES (?,?,?,?,?,?)",
+                   (pid, request.form['description'], float(request.form['amount']), request.form['type'], request.form['date'], request.form['method']))
+        db.commit()
+        return redirect('/expenses')
     return render_page("Create Expense",'''<div class="card"><div class="card-header">Create Expense</div>
     <form method="POST"><label>Type*</label><input type="text" name="type" required><label>Amount (UGX)*</label><input type="number" name="amount" step="0.01" required><label>Date*</label><input type="date" name="date" required><label>Payment method*</label><select name="method"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="bank_transfer">Bank Transfer</option></select><label>Description</label><input type="text" name="description"><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
 
@@ -1504,7 +1516,9 @@ def delete_expense(eid): db = get_db(); db.execute("DELETE FROM expenses WHERE i
 @login_required
 def messages():
     pid = session['provider_id']
-    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO sms_log (provider_id,phone_number,message) VALUES (?,?,?)",(pid,request.form.get('phone',''),request.form['message'])); db.commit(); return redirect('/messages')
+    if request.method == 'POST':
+        db = get_db(); db.execute("INSERT INTO sms_log (provider_id,phone_number,message) VALUES (?,?,?)",(pid,request.form.get('phone',''),request.form['message'])); db.commit()
+        return redirect('/messages')
     db = get_db(); msgs = db.execute("SELECT * FROM sms_log WHERE provider_id=? ORDER BY id DESC LIMIT 50",(pid,)).fetchall()
     rows = "".join(f'<tr><td>{m["phone_number"]}</td><td>SMS</td><td>{m["message"]}</td><td>Yes</td><td>-</td><td>{m["sent_at"][:16] if m["sent_at"] else ""}</td></tr>' for m in msgs) or '<tr><td colspan="6">No messages sent.</td></tr>'
     content = f'''<div class="card"><div class="card-header">Messages <a href="/messages/send" class="btn btn-success btn-small">Send message</a></div>
@@ -1514,7 +1528,9 @@ def messages():
 @app.route('/messages/send', methods=['GET','POST'])
 @login_required
 def send_message():
-    if request.method == 'POST': return redirect('/messages')
+    pid = session['provider_id']
+    if request.method == 'POST':
+        return redirect('/messages')
     return render_page("Create Message",'''<div class="card"><div class="card-header">Create Message</div>
     <form method="POST"><label>Channel</label><select><option>SMS</option><option>WhatsApp</option></select><label>Message*</label><textarea name="message" required></textarea><button type="submit" class="btn" style="margin-top:20px;">Send</button></form></div>''', get_pending_count(pid), pid, admin=True)
 
@@ -1524,14 +1540,18 @@ def send_message():
 @app.route('/email', methods=['GET','POST'])
 @login_required
 def email():
-    if request.method == 'POST': return redirect('/email')
+    pid = session['provider_id']
+    if request.method == 'POST':
+        return redirect('/email')
     return render_page("Emails",'''<div class="card"><div class="card-header">Emails <a href="/email/send" class="btn btn-success btn-small">Send Email</a></div>
     <table><thead><tr><th>Subject</th><th>Email</th><th>Message</th><th>Status</th><th>Sent At</th></tr></thead><tbody><tr><td colspan="5">No emails sent yet.</td></tr></tbody></table></div>''', get_pending_count(pid), pid, admin=True)
 
 @app.route('/email/send', methods=['GET','POST'])
 @login_required
 def send_email():
-    if request.method == 'POST': return redirect('/email')
+    pid = session['provider_id']
+    if request.method == 'POST':
+        return redirect('/email')
     return render_page("Send Email",'''<div class="card"><div class="card-header">Send Email</div>
     <form method="POST"><label>Subject*</label><input type="text" name="subject" required><label>Message*</label><textarea name="message" required></textarea><button type="submit" class="btn" style="margin-top:20px;">Send</button></form></div>''', get_pending_count(pid), pid, admin=True)
 
@@ -1550,7 +1570,12 @@ def campaign():
 @app.route('/campaign/add', methods=['GET','POST'])
 @login_required
 def add_campaign():
-    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO campaigns (provider_id,name,description,kind,type,start_date,end_date,status) VALUES (?,?,?,?,?,?,?,'active')",(session['provider_id'],request.form['name'],request.form['description'],request.form['kind'],request.form['type'],request.form['start_date'],request.form['end_date'])); db.commit(); return redirect('/campaign')
+    pid = session['provider_id']
+    if request.method == 'POST':
+        db = get_db(); db.execute("INSERT INTO campaigns (provider_id,name,description,kind,type,start_date,end_date,status) VALUES (?,?,?,?,?,?,?,'active')",
+                   (pid, request.form['name'], request.form['description'], request.form['kind'], request.form['type'], request.form['start_date'], request.form['end_date']))
+        db.commit()
+        return redirect('/campaign')
     return render_page("Create Campaign",'''<div class="card"><div class="card-header">Create Campaign</div>
     <form method="POST"><label>Name*</label><input type="text" name="name" required><label>Kind*</label><select name="kind"><option value="Portal Ad">Portal Ad</option><option value="Message">Message</option></select><label>Type*</label><input type="text" name="type" required><label>Start Date*</label><input type="date" name="start_date" required><label>End Date</label><input type="date" name="end_date"><label>Description</label><textarea name="description"></textarea><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
 
@@ -1583,7 +1608,12 @@ def mikrotik():
 @app.route('/mikrotik/add', methods=['GET','POST'])
 @login_required
 def add_mikrotik():
-    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO mikrotik_routers (provider_id,name,ip_address,username,password,api_port,is_active) VALUES (?,?,?,?,?,?,?)",(session['provider_id'],request.form['name'],request.form['ip'],request.form['username'],request.form['password'],int(request.form['port'] or 8728),1 if request.form.get('is_active') else 0)); db.commit(); return redirect('/mikrotik')
+    pid = session['provider_id']
+    if request.method == 'POST':
+        db = get_db(); db.execute("INSERT INTO mikrotik_routers (provider_id,name,ip_address,username,password,api_port,is_active) VALUES (?,?,?,?,?,?,?)",
+                   (pid, request.form['name'], request.form['ip'], request.form['username'], request.form['password'], int(request.form.get('port', 8728)), 1 if request.form.get('is_active') else 0))
+        db.commit()
+        return redirect('/mikrotik')
     return render_page("Add MikroTik Device",'''<div class="card"><div class="card-header">Add MikroTik Device</div>
     <form method="POST"><label>Mikrotik Identity*</label><input type="text" name="name" required><label>IP Address</label><input type="text" name="ip"><label>Username</label><input type="text" name="username"><label>Password</label><input type="password" name="password"><label>API Port</label><input type="number" name="port" value="8728"><label><input type="checkbox" name="is_active" checked> Active</label><button type="submit" class="btn" style="margin-top:20px;">Save</button></form></div>''', get_pending_count(pid), pid, admin=True)
 
@@ -1616,7 +1646,12 @@ def equipment():
 @app.route('/equipment/add', methods=['GET','POST'])
 @login_required
 def add_equipment():
-    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO equipment (provider_id,name,model,serial_number,user_id,price,paid_amount) VALUES (?,?,?,?,?,?,?)",(session['provider_id'],request.form['name'],request.form['model'],request.form['serial'],int(request.form.get('user_id',0)),float(request.form.get('price',0)),float(request.form.get('paid',0)))); db.commit(); return redirect('/equipment')
+    pid = session['provider_id']
+    if request.method == 'POST':
+        db = get_db(); db.execute("INSERT INTO equipment (provider_id,name,model,serial_number,user_id,price,paid_amount) VALUES (?,?,?,?,?,?,?)",
+                   (pid, request.form['name'], request.form['model'], request.form['serial'], int(request.form.get('user_id', 0)), float(request.form.get('price', 0)), float(request.form.get('paid', 0))))
+        db.commit()
+        return redirect('/equipment')
     return render_page("Create Equipment",'''<div class="card"><div class="card-header">Create Equipment</div>
     <form method="POST"><label>Name*</label><input type="text" name="name" required><label>Model</label><input type="text" name="model"><label>Serial Number</label><input type="text" name="serial"><label>Price (UGX)</label><input type="number" name="price" step="0.01"><label>Paid Amount (UGX)</label><input type="number" name="paid" step="0.01"><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
 
@@ -1684,7 +1719,7 @@ def stats():
     <div class="platform-revenue"><strong>RockabyTech Platform Fee (5% this week):</strong> UGX {wf:,} &nbsp; <small>({ws.strftime('%d %b')} - {we.strftime('%d %b')})</small></div>
     <div class="card"><div class="card-header">Top Selling Plans</div><table><tr><th>Plan</th><th>Sold</th></tr>{''.join(f'<tr><td>{p["name"]}</td><td>{p["c"]}</td></tr>' for p in pstats) or '<tr><td colspan="2">No sales yet.</td></tr>'}</table></div><a href="/dashboard" class="btn btn-outline">Back to Dashboard</a>"""
     return render_page("Statistics", content, get_pending_count(pid), pid, admin=True)
-
+    
 # ------------------------------------------------------------
 # SUPER ADMIN
 # ------------------------------------------------------------
