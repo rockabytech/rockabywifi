@@ -916,18 +916,91 @@ def api_package_perf():
 @app.route('/active-users')
 @login_required
 def active_users():
-    pid = session['provider_id']; db = get_db()
-    vouchers = db.execute("SELECT v.id, v.code, v.phone_number, p.name as pn, v.created_at FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? AND v.used=0",(pid,)).fetchall()
-    subs = db.execute("SELECT s.id as sid, sub.username, sub.phone, s.ip_address, s.started_at FROM sessions s JOIN subscribers sub ON s.subscriber_id=sub.id WHERE s.provider_id=?",(pid,)).fetchall()
+    pid = session['provider_id']
+    db = get_db()
+    
+    vouchers = db.execute(
+        "SELECT v.id, v.code, v.phone_number, p.name as pn, v.created_at "
+        "FROM vouchers v JOIN plans p ON v.plan_id=p.id "
+        "WHERE v.provider_id=? AND v.used=0", (pid,)
+    ).fetchall()
+    
+    subs = db.execute(
+        "SELECT s.id as sid, sub.username, sub.phone, s.ip_address, s.started_at "
+        "FROM sessions s JOIN subscribers sub ON s.subscriber_id=sub.id "
+        "WHERE s.provider_id=?", (pid,)
+    ).fetchall()
+    
     rows = ''
+    
     for v in vouchers:
-        rows += f'<tr><td>{s["username"]}</td><td>{s["phone"] or ""}</td><td>PPPoE</td><td>{s["ip_address"]}</td><td>{s["started_at"]}</td><td>-</td><td><div class="dropdown" style="position:relative;display:inline-block;"><button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button><div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:150px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;"><a href="/disconnect-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect</a><a href="/suspend-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect until payment</a></div></div></td></tr>'
+        rows += f'''
+        <tr>
+            <td>{v["code"]}</td>
+            <td>{v["phone_number"]}</td>
+            <td>Hotspot</td>
+            <td>{v["pn"]}</td>
+            <td>{v["created_at"]}</td>
+            <td>-</td>
+            <td>
+                <div class="dropdown" style="position:relative;display:inline-block;">
+                    <button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button>
+                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:150px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;">
+                        <a href="/disconnect-voucher/{v["id"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect</a>
+                        <a href="/disconnect-voucher-until-payment/{v["id"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect until payment</a>
+                    </div>
+                </div>
+            </td>
+        </tr>
+        '''
+    
     for s in subs:
-        rows += f'<tr><td>{s["username"]}</td><td>{s["phone"] or ""}</td><td>PPPoE</td><td>{s["ip_address"]}</td><td>{s["started_at"]}</td><td>-</td><td><div class="dropdown" style="position:relative;display:inline-block;"><button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">⋮</button><div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:150px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;"><a href="/disconnect-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect</a><a href="/suspend-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect until payment</a></div></div></td></tr>'
-    if not rows: rows = '<tr><td colspan="7">No active users at the moment.</td></tr>'
-    content = f'''<div class="card"><div class="card-header">Active Users</div>
-    <div class="tabs"><span class="tab active">All <span class="badge">{len(vouchers)+len(subs)}</span></span><span class="tab">Hotspot <span class="badge">{len(vouchers)}</span></span><span class="tab">PPPoE <span class="badge">{len(subs)}</span></span></div>
-    <table><thead><tr><th>Username</th><th>IP/MAC</th><th>Router</th><th>Session Start</th><th>Session End</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
+        rows += f'''
+        <tr>
+            <td>{s["username"]}</td>
+            <td>{s["phone"] or ""}</td>
+            <td>PPPoE</td>
+            <td>{s["ip_address"]}</td>
+            <td>{s["started_at"]}</td>
+            <td>-</td>
+            <td>
+                <div class="dropdown" style="position:relative;display:inline-block;">
+                    <button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button>
+                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:150px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;">
+                        <a href="/disconnect-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect</a>
+                        <a href="/suspend-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;">Disconnect until payment</a>
+                    </div>
+                </div>
+            </td>
+        </tr>
+        '''
+    
+    if not rows:
+        rows = '<tr><td colspan="7">No active users at the moment.</td></tr>'
+    
+    content = f'''
+    <div class="card">
+        <div class="card-header">Active Users</div>
+        <div class="tabs">
+            <span class="tab active">All <span class="badge">{len(vouchers)+len(subs)}</span></span>
+            <span class="tab">Hotspot <span class="badge">{len(vouchers)}</span></span>
+            <span class="tab">PPPoE <span class="badge">{len(subs)}</span></span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>IP/MAC</th>
+                    <th>Router</th>
+                    <th>Session Start</th>
+                    <th>Session End</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>{rows}</tbody>
+        </table>
+    </div>
+    '''
     return render_page("Active Users", content, get_pending_count(pid), pid, admin=True)
 
 @app.route('/disconnect-voucher/<int:vid>')
@@ -1562,82 +1635,72 @@ def super_admin_login():
 
 @app.route('/admin/dashboard')
 def super_admin_dashboard():
-    if not session.get('super_admin'): return redirect('/admin')
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    
     db = get_db()
+    
+    # Statistics
     total_providers = db.execute("SELECT COUNT(*) as c FROM providers").fetchone()['c']
     active_providers = db.execute("SELECT COUNT(*) as c FROM providers WHERE is_active=1").fetchone()['c']
     total_revenue = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE status='approved'").fetchone()['t']
     platform_fee = int(total_revenue * 0.05) if total_revenue else 0
     total_users = db.execute("SELECT COUNT(DISTINCT phone_number) as c FROM vouchers").fetchone()['c']
     today = date.today().isoformat()
-    today_revenue = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE status='approved' AND date(created_at)=?",(today,)).fetchone()['t']
+    today_revenue = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE status='approved' AND date(created_at)=?", (today,)).fetchone()['t']
     pending_approvals = db.execute("SELECT COUNT(*) as c FROM voucher_requests WHERE status='pending'").fetchone()['c']
-
+    
+    # Provider list
     providers = db.execute("SELECT * FROM providers ORDER BY id").fetchall()
     rows = ''
     for p in providers:
-        total = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved'",(p['id'],)).fetchone()['t']
-        this_month = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ?",(p['id'], date.today().replace(day=1).isoformat())).fetchone()['t']
+        total = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved'", (p['id'],)).fetchone()['t']
+        this_month = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ?", (p['id'], date.today().replace(day=1).isoformat())).fetchone()['t']
         fee = int(total * 0.05)
         monthly_fee = int(this_month * 0.05)
-        voucher_count = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=?",(p['id'],)).fetchone()['c']
+        voucher_count = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=?", (p['id'],)).fetchone()['c']
         sub_status = "Active" if p['is_active'] else "Suspended"
         expiry = p['subscription_expiry'] if p['subscription_expiry'] else '-'
         expired = False
         if p['subscription_expiry'] and date.fromisoformat(p['subscription_expiry']) < date.today():
-            sub_status = "Expired"; expired = True
+            sub_status = "Expired"
+            expired = True
         row_class = 'style="background:rgba(255,212,59,0.1);"' if expired else ''
-        rows += f'''<tr {row_class}><td>{p['id']}</td><td><strong>{p['business_name']}</strong></td><td>{p['contact']}</td><td><span class="badge" style="background:{'#51cf66' if sub_status=='Active' else '#ff6b6b' if sub_status=='Suspended' else '#ffd43b'};color:#000;padding:4px 10px;border-radius:12px;">{sub_status}</span></td><td>UGX {total or 0:,}</td><td>UGX {fee:,}</td><td>UGX {monthly_fee:,}</td><td>{voucher_count}</td><td>{expiry}</td>
-        <td style="overflow:visible;"><div class="dropdown" style="position:relative;display:inline-block;"><button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button><div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:200px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;">
-            <a href="/admin/impersonate/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
-            <a href="/admin/extend/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
-            <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-edit"></i> Edit</a>
-            <a href="/admin/invoice/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
-            <a href="/admin/message/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-envelope"></i> Message</a>
-            <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
-            <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
-        </div></div></td></tr>'''
-        <td style="overflow:visible;"><div class="dropdown" style="position:relative;display:inline-block;"><button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button><div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:200px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;">
-            <a href="/admin/impersonate/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
-            <a href="/admin/extend/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
-            <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-edit"></i> Edit</a>
-            <a href="/admin/invoice/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
-            <a href="/admin/message/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-envelope"></i> Message</a>
-            <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
-            <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
-        </div></div></td></tr>'''
-        <td style="overflow:visible;"><div class="dropdown" style="position:relative;display:inline-block;"><button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button><div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:200px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;">
-            <a href="/admin/impersonate/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
-            <a href="/admin/extend/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
-            <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-edit"></i> Edit</a>
-            <a href="/admin/invoice/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
-            <a href="/admin/message/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-envelope"></i> Message</a>
-            <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
-            <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
-        </div></div></td></tr>'''
-        <td style="overflow:visible;"><div class="dropdown" style="position:relative;display:inline-block;"><button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">⋮</button><div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:200px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;">
-            <a href="/admin/impersonate/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
-            <a href="/admin/extend/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
-            <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-edit"></i> Edit</a>
-            <a href="/admin/invoice/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
-            <a href="/admin/message/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-envelope"></i> Message</a>
-            <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
-            <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
-        </div></div></td></tr>'''
-        <td style="overflow:visible;"><div class="dropdown"><button class="btn btn-small">⋮</button><div class="dropdown-content">
-            <a href="/admin/impersonate/{p['id']}"><i class="fas fa-user-secret"></i> Impersonate</a>
-            <a href="/admin/extend/{p['id']}"><i class="fas fa-calendar-plus"></i> Extend</a>
-            <a href="/admin/edit-provider/{p['id']}"><i class="fas fa-edit"></i> Edit</a>
-            <a href="/admin/invoice/{p['id']}"><i class="fas fa-file-invoice"></i> Send Invoice</a>
-            <a href="/admin/message/{p['id']}"><i class="fas fa-envelope"></i> Message</a>
-            <a href="/admin/toggle-provider/{p['id']}"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
-            <a href="/admin/delete-provider/{p['id']}" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
-        </div></div></td></tr>'''
-
+        
+        rows += f'''
+        <tr {row_class}>
+            <td>{p['id']}</td>
+            <td><strong>{p['business_name']}</strong></td>
+            <td>{p['contact']}</td>
+            <td><span class="badge" style="background:{'#51cf66' if sub_status=='Active' else '#ff6b6b' if sub_status=='Suspended' else '#ffd43b'};color:#000;padding:4px 10px;border-radius:12px;">{sub_status}</span></td>
+            <td>UGX {total or 0:,}</td>
+            <td>UGX {fee:,}</td>
+            <td>UGX {monthly_fee:,}</td>
+            <td>{voucher_count}</td>
+            <td>{expiry}</td>
+            <td style="overflow:visible;">
+                <div class="dropdown" style="position:relative;display:inline-block;">
+                    <button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button>
+                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:200px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;">
+                        <a href="/admin/impersonate/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
+                        <a href="/admin/extend/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
+                        <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-edit"></i> Edit</a>
+                        <a href="/admin/invoice/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
+                        <a href="/admin/message/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-envelope"></i> Message</a>
+                        <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
+                        <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
+                    </div>
+                </div>
+            </td>
+        </tr>
+        '''
+    
+    # Audit log
     audit = db.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 20").fetchall()
     audit_rows = ''.join(f'<tr><td>{a["created_at"][:16]}</td><td>{a["action"]}</td><td>{a["details"]}</td></tr>' for a in audit) or '<tr><td colspan="3">No activity yet.</td></tr>'
-
-    content = f'''<div class="stat-grid">
+    
+    content = f'''
+    <div class="stat-grid">
         <div class="stat-card"><h3>{total_providers}</h3><small>Total Providers</small></div>
         <div class="stat-card"><h3>{active_providers}</h3><small>Active</small></div>
         <div class="stat-card"><h3>UGX {total_revenue or 0:,}</h3><small>Total Revenue</small></div>
@@ -1645,11 +1708,31 @@ def super_admin_dashboard():
         <div class="stat-card"><h3>{total_users}</h3><small>End Users</small></div>
         <div class="stat-card"><h3>{pending_approvals}</h3><small>Pending</small></div>
     </div>
-    <div class="card"><div class="card-header">Today: UGX {today_revenue or 0:,} revenue | UGX {int(today_revenue * 0.05):,} your fee</div></div>
-    <div class="card"><div class="card-header">Provider Management <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a></div>
-    <table><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>Status</th><th>Revenue</th><th>Total Fee</th><th>Fee/Mo</th><th>Vouchers</th><th>Expiry</th><th>Actions</th></tr></thead><tbody>{rows}</tbody></table></div>
-    <div class="card"><div class="card-header">🕒 Recent Activity</div><table><thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead><tbody>{audit_rows}</tbody></table></div>
-    <p style="margin-top:20px;"><a href="/admin/logout" class="btn btn-outline">Logout</a></p>'''
+    <div class="card">
+        <div class="card-header">Today: UGX {today_revenue or 0:,} revenue | UGX {int(today_revenue * 0.05):,} your fee</div>
+    </div>
+    <div class="card">
+        <div class="card-header">Provider Management <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a></div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th><th>Name</th><th>Contact</th><th>Status</th>
+                    <th>Revenue</th><th>Total Fee</th><th>Fee/Mo</th>
+                    <th>Vouchers</th><th>Expiry</th><th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>{rows}</tbody>
+        </table>
+    </div>
+    <div class="card">
+        <div class="card-header">🕒 Recent Activity</div>
+        <table>
+            <thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead>
+            <tbody>{audit_rows}</tbody>
+        </table>
+    </div>
+    <p style="margin-top:20px;"><a href="/admin/logout" class="btn btn-outline">Logout</a></p>
+    '''
     return render_page("Super Admin Dashboard", content, 0, admin=False)
 
 @app.route('/admin/add-provider', methods=['GET','POST'])
