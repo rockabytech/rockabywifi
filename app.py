@@ -573,6 +573,45 @@ base_template = """
                     .then(() => console.log('Service Worker registered'))
                     .catch(err => console.log('Service Worker failed:', err));
             });
+
+            // ============================================================
+// FIXED DROPDOWN TOGGLE (for super admin dropdown)
+// ============================================================
+function toggleFixedDropdown(btn, dropdownId) {
+    var content = document.getElementById(dropdownId);
+    if (!content) return;
+    
+    // Close all other fixed dropdowns
+    document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
+        if (el.id !== dropdownId) el.style.display = 'none';
+    });
+    
+    // Toggle this one
+    if (content.style.display === 'block') {
+        content.style.display = 'none';
+    } else {
+        // Position the fixed dropdown near the button
+        var rect = btn.getBoundingClientRect();
+        content.style.left = (rect.left - 50) + 'px';
+        content.style.top = (rect.bottom + 5) + 'px';
+        content.style.display = 'block';
+    }
+}
+
+// Close fixed dropdowns when clicking outside
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.dropdown-toggle') && !e.target.closest('.fixed-dropdown-content')) {
+        document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
+            el.style.display = 'none';
+        });
+    }
+});
+
+// Close fixed dropdowns on scroll
+window.addEventListener('scroll', function() {
+    document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
+        el.style.display = 'none';
+    });
         }
     </script>
 </body>
@@ -1708,6 +1747,8 @@ def super_admin_dashboard():
             expired = True
         row_class = 'style="background:rgba(255,212,59,0.1);"' if expired else ''
         
+        # Each row gets a unique ID for its dropdown
+        row_id = f"dropdown_{p['id']}"
         rows += f'''
         <tr {row_class}>
             <td>{p['id']}</td>
@@ -1720,17 +1761,15 @@ def super_admin_dashboard():
             <td>{voucher_count}</td>
             <td>{expiry}</td>
             <td style="overflow:visible; position:relative;">
-                <div class="dropdown" style="position:relative;display:inline-block;z-index:9999999;">
-                    <button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button>
-                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:220px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.3);z-index:99999999;overflow:visible;padding:5px 0;pointer-events:auto;">
-                        <a href="/admin/impersonate/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
-                        <a href="/admin/extend/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
-                        <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-edit"></i> Edit</a>
-                        <a href="/admin/invoice/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
-                        <a href="/admin/message/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-envelope"></i> Message</a>
-                        <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
-                        <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
-                    </div>
+                <button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleFixedDropdown(this, '{row_id}');">&#8942;</button>
+                <div id="{row_id}" class="fixed-dropdown-content" style="display:none;position:fixed;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.3);z-index:99999999;overflow:visible;padding:5px 0;min-width:200px;">
+                    <a href="/admin/impersonate/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
+                    <a href="/admin/extend/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
+                    <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-edit"></i> Edit</a>
+                    <a href="/admin/invoice/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
+                    <a href="/admin/message/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-envelope"></i> Message</a>
+                    <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
+                    <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
                 </div>
             </td>
         </tr>
