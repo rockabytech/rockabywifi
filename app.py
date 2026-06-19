@@ -1775,7 +1775,7 @@ def super_admin_dashboard():
     <p style="margin-top:20px;"><a href="/admin/logout" class="btn btn-outline">Logout</a></p>
     '''
     return render_page("Super Admin Dashboard", content, 0, admin=False)
-
+    
 @app.route('/admin/add-provider', methods=['GET','POST'])
 def add_provider():
     if not session.get('super_admin'): return redirect('/admin')
