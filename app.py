@@ -1160,41 +1160,85 @@ def ip_bindings():
 @app.route('/ip-bindings/add', methods=['GET','POST'])
 @login_required
 def add_ip_binding():
+    pid = session['provider_id']  # Define pid
+    db = get_db()
+    
     if request.method == 'POST':
-        db = get_db(); db.execute("INSERT INTO ip_bindings (provider_id,mikrotik_id,name,package_id,dhcp_lease,address,mac_address,expires_at) VALUES (?,?,?,?,?,?,?,?)",
-                   (session['provider_id'], int(request.form.get('mikrotik_id',0)), request.form['name'], int(request.form.get('package_id',0)), request.form.get('dhcp',''), request.form['address'], request.form['mac'], request.form.get('expires_at'))); db.commit()
+        db.execute("""INSERT INTO ip_bindings 
+                   (provider_id, mikrotik_id, name, package_id, dhcp_lease, address, mac_address, expires_at) 
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                   (pid,
+                    int(request.form.get('mikrotik_id', 0)),
+                    request.form['name'],
+                    int(request.form.get('package_id', 0)),
+                    request.form.get('dhcp', ''),
+                    request.form['address'],
+                    request.form['mac'],
+                    request.form.get('expires_at')))
+        db.commit()
         return redirect('/ip-bindings')
-    db = get_db(); routers = db.execute("SELECT id, name FROM mikrotik_routers WHERE provider_id=?",(session['provider_id'],)).fetchall()
+    
+    routers = db.execute("SELECT id, name FROM mikrotik_routers WHERE provider_id=?", (pid,)).fetchall()
     router_opts = ''.join(f'<option value="{r["id"]}">{r["name"]}</option>' for r in routers)
-    packages = db.execute("SELECT id, name FROM plans WHERE provider_id=? AND is_active=1",(session['provider_id'],)).fetchall()
+    
+    packages = db.execute("SELECT id, name FROM plans WHERE provider_id=? AND is_active=1", (pid,)).fetchall()
     pkg_opts = ''.join(f'<option value="{p["id"]}">{p["name"]}</option>' for p in packages)
-    return render_page("Bind an IP",f'''<div class="card"><div class="card-header">Bind an IP</div>
-    <form method="POST"><label>MikroTik*</label><select name="mikrotik_id">{router_opts}</select>
-    <label>Name*</label><input type="text" name="name" required>
-    <label>Package</label><select name="package_id"><option value="">None</option>{pkg_opts}</select>
-    <label>DHCP Lease</label><input type="text" name="dhcp" placeholder="Select a DHCP lease to auto-fill">
-    <label>Address*</label><input type="text" name="address" required>
-    <label>MAC Address*</label><input type="text" name="mac" required>
-    <label>Expires At (Optional)</label><input type="datetime-local" name="expires_at">
-    <button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+    
+    content = f'''<div class="card"><div class="card-header">Bind an IP</div>
+    <form method="POST">
+        <label>MikroTik*</label><select name="mikrotik_id">{router_opts}</select>
+        <label>Name*</label><input type="text" name="name" required>
+        <label>Package</label><select name="package_id"><option value="">None</option>{pkg_opts}</select>
+        <label>DHCP Lease</label><input type="text" name="dhcp" placeholder="Select a DHCP lease to auto-fill">
+        <label>Address*</label><input type="text" name="address" required>
+        <label>MAC Address*</label><input type="text" name="mac" required>
+        <label>Expires At (Optional)</label><input type="datetime-local" name="expires_at">
+        <button type="submit" class="btn" style="margin-top:20px;">Create</button>
+    </form></div>'''
+    return render_page("Bind an IP", content, get_pending_count(pid), pid, admin=True)
 
 @app.route('/ip-bindings/edit/<int:bid>', methods=['GET','POST'])
 @login_required
 def edit_ip_binding(bid):
+    pid = session['provider_id']  # Define pid
     db = get_db()
-    if request.method == 'POST': db.execute("UPDATE ip_bindings SET mikrotik_id=?,name=?,package_id=?,dhcp_lease=?,address=?,mac_address=?,expires_at=? WHERE id=? AND provider_id=?",(int(request.form.get('mikrotik_id',0)), request.form['name'], int(request.form.get('package_id',0)), request.form.get('dhcp',''), request.form['address'], request.form['mac'], request.form.get('expires_at'), bid, session['provider_id'])); db.commit(); return redirect('/ip-bindings')
-    b = db.execute("SELECT * FROM ip_bindings WHERE id=? AND provider_id=?",(bid,session['provider_id'])).fetchone()
-    if not b: return "Not found", 404
-    routers = db.execute("SELECT id, name FROM mikrotik_routers WHERE provider_id=?",(session['provider_id'],)).fetchall(); router_opts = ''.join(f'<option value="{r["id"]}" {"selected" if r["id"]==b["mikrotik_id"] else ""}>{r["name"]}</option>' for r in routers)
-    packages = db.execute("SELECT id, name FROM plans WHERE provider_id=? AND is_active=1",(session['provider_id'],)).fetchall(); pkg_opts = ''.join(f'<option value="{p["id"]}" {"selected" if p["id"]==b["package_id"] else ""}>{p["name"]}</option>' for p in packages)
-    return render_page("Edit IP Binding",f'''<div class="card"><div class="card-header">Edit IP Binding</div><form method="POST"><label>MikroTik</label><select name="mikrotik_id">{router_opts}</select>
-    <label>Name</label><input type="text" name="name" value="{b["name"]}" required><label>Package</label><select name="package_id"><option value="">None</option>{pkg_opts}</select>
-    <label>Address</label><input type="text" name="address" value="{b["address"]}" required><label>MAC Address</label><input type="text" name="mac" value="{b["mac_address"]}" required>
-    <label>Expires At</label><input type="datetime-local" name="expires_at" value="{b["expires_at"] if b["expires_at"] else ""}"><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>''', get_pending_count(pid), pid, admin=True)
-
-@app.route('/ip-bindings/delete/<int:bid>')
-@login_required
-def delete_ip_binding(bid): db = get_db(); db.execute("DELETE FROM ip_bindings WHERE id=? AND provider_id=?",(bid,session['provider_id'])); db.commit(); return redirect('/ip-bindings')
+    
+    if request.method == 'POST':
+        db.execute("""UPDATE ip_bindings SET 
+                   mikrotik_id=?, name=?, package_id=?, dhcp_lease=?, address=?, mac_address=?, expires_at=? 
+                   WHERE id=? AND provider_id=?""",
+                   (int(request.form.get('mikrotik_id', 0)),
+                    request.form['name'],
+                    int(request.form.get('package_id', 0)),
+                    request.form.get('dhcp', ''),
+                    request.form['address'],
+                    request.form['mac'],
+                    request.form.get('expires_at'),
+                    bid, pid))
+        db.commit()
+        return redirect('/ip-bindings')
+    
+    b = db.execute("SELECT * FROM ip_bindings WHERE id=? AND provider_id=?", (bid, pid)).fetchone()
+    if not b:
+        return "Not found", 404
+    
+    routers = db.execute("SELECT id, name FROM mikrotik_routers WHERE provider_id=?", (pid,)).fetchall()
+    router_opts = ''.join(f'<option value="{r["id"]}" {"selected" if r["id"]==b["mikrotik_id"] else ""}>{r["name"]}</option>' for r in routers)
+    
+    packages = db.execute("SELECT id, name FROM plans WHERE provider_id=? AND is_active=1", (pid,)).fetchall()
+    pkg_opts = ''.join(f'<option value="{p["id"]}" {"selected" if p["id"]==b["package_id"] else ""}>{p["name"]}</option>' for p in packages)
+    
+    content = f'''<div class="card"><div class="card-header">Edit IP Binding</div>
+    <form method="POST">
+        <label>MikroTik</label><select name="mikrotik_id">{router_opts}</select>
+        <label>Name</label><input type="text" name="name" value="{b["name"]}" required>
+        <label>Package</label><select name="package_id"><option value="">None</option>{pkg_opts}</select>
+        <label>Address</label><input type="text" name="address" value="{b["address"]}" required>
+        <label>MAC Address</label><input type="text" name="mac" value="{b["mac_address"]}" required>
+        <label>Expires At</label><input type="datetime-local" name="expires_at" value="{b["expires_at"] if b["expires_at"] else ''}">
+        <button type="submit" class="btn" style="margin-top:20px;">Update</button>
+    </form></div>'''
+    return render_page("Edit IP Binding", content, get_pending_count(pid), pid, admin=True)
 
 # ------------------------------------------------------------
 # TICKETS
