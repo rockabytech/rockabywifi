@@ -303,19 +303,60 @@ base_template = """
             border-bottom:1px solid var(--glass-border); padding:14px 24px;
             display:flex; align-items:center; justify-content:space-between;
             transition: background 0.3s, border 0.3s;
+            position: relative;
+            z-index: 9999 !important;
         }
         .hamburger { font-size:1.5rem; cursor:pointer; background:none; border:none; color:var(--text); display:block; }
-        .topbar-right { display:flex; align-items:center; gap:18px; position:relative; }
-        .settings-dropdown { position:relative; z-index:1000; overflow:visible; }
-        .settings-dropdown-content {
-            display:none; position:absolute; right:0; top:100%; background:var(--card-bg);
-            backdrop-filter: blur(20px); min-width:180px; box-shadow:var(--shadow); z-index:999999;
-            border-radius:12px; overflow:visible; border:1px solid var(--glass-border);
+        .topbar-right {
+            display:flex; align-items:center; gap:18px;
+            position: relative;
+            z-index: 99999 !important;
         }
-        .settings-dropdown:hover .settings-dropdown-content { display:block; }
-        .settings-dropdown-content a { color:var(--text); padding:12px 18px; text-decoration:none; display:block; }
-        .settings-dropdown-content a:hover { background:rgba(26,115,232,0.1); }
-        .theme-toggle { background:rgba(26,115,232,0.1); border:1px solid var(--glass-border); border-radius:50%; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:1.2rem; transition:all 0.2s; color:var(--text); }
+        .settings-dropdown {
+            position: relative;
+            z-index: 99999 !important;
+            overflow: visible !important;
+        }
+        .settings-dropdown-content {
+            display: none;
+            position: absolute !important;
+            right: 0 !important;
+            top: 100% !important;
+            background: var(--card-bg) !important;
+            backdrop-filter: blur(20px) !important;
+            min-width: 180px !important;
+            box-shadow: var(--shadow) !important;
+            z-index: 999999 !important;
+            border-radius: 12px !important;
+            border: 1px solid var(--glass-border) !important;
+            overflow: visible !important;
+        }
+        .settings-dropdown:hover .settings-dropdown-content {
+            display: block !important;
+        }
+        .settings-dropdown-content a {
+            color: var(--text);
+            padding: 12px 18px;
+            text-decoration: none;
+            display: block;
+        }
+        .settings-dropdown-content a:hover {
+            background: rgba(26,115,232,0.1);
+        }
+        .theme-toggle {
+            background:rgba(26,115,232,0.1);
+            border:1px solid var(--glass-border);
+            border-radius:50%;
+            width:40px;
+            height:40px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            cursor:pointer;
+            font-size:1.2rem;
+            transition:all 0.2s;
+            color:var(--text);
+        }
         .theme-toggle:hover { background:rgba(26,115,232,0.2); transform:scale(1.05); }
         .container { max-width:1400px; margin:24px auto; padding:0 20px; }
         .card {
