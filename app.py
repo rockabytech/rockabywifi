@@ -486,6 +486,16 @@ base_template = """
             .sidebar { transform:translateX(-100%); } .sidebar.open { transform:translateX(0); }
             .main-content { margin-left:0; } .chart-row { flex-direction:column; }
             .chart-row .card { min-width:100%; }
+            .stat-grid {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 10px !important;
+            }
+            .stat-card {
+                padding: 16px !important;
+            }
+            .stat-card h3 {
+                font-size: 1.5rem !important;
+            }
         }
     </style>
 </head>
@@ -541,6 +551,48 @@ base_template = """
         });
 
         // ============================================================
+        // FIXED DROPDOWN TOGGLE (for super admin dropdown)
+        // ============================================================
+        function toggleFixedDropdown(btn, dropdownId) {
+            var content = document.getElementById(dropdownId);
+            if (!content) return;
+            
+            // Close all other fixed dropdowns
+            document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
+                if (el.id !== dropdownId) el.style.display = 'none';
+            });
+            
+            // Toggle this one
+            if (content.style.display === 'block') {
+                content.style.display = 'none';
+            } else {
+                // Position the fixed dropdown near the button
+                var rect = btn.getBoundingClientRect();
+                var leftPos = rect.left - 50;
+                if (leftPos < 10) leftPos = 10;
+                content.style.left = leftPos + 'px';
+                content.style.top = (rect.bottom + 5) + 'px';
+                content.style.display = 'block';
+            }
+        }
+
+        // Close fixed dropdowns when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.dropdown-toggle') && !e.target.closest('.fixed-dropdown-content')) {
+                document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
+                    el.style.display = 'none';
+                });
+            }
+        });
+
+        // Close fixed dropdowns on scroll
+        window.addEventListener('scroll', function() {
+            document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
+                el.style.display = 'none';
+            });
+        });
+
+        // ============================================================
         // PWA INSTALL PROMPT
         // ============================================================
         let deferredPrompt;
@@ -573,45 +625,6 @@ base_template = """
                     .then(() => console.log('Service Worker registered'))
                     .catch(err => console.log('Service Worker failed:', err));
             });
-
-            // ============================================================
-// FIXED DROPDOWN TOGGLE (for super admin dropdown)
-// ============================================================
-function toggleFixedDropdown(btn, dropdownId) {
-    var content = document.getElementById(dropdownId);
-    if (!content) return;
-    
-    // Close all other fixed dropdowns
-    document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
-        if (el.id !== dropdownId) el.style.display = 'none';
-    });
-    
-    // Toggle this one
-    if (content.style.display === 'block') {
-        content.style.display = 'none';
-    } else {
-        // Position the fixed dropdown near the button
-        var rect = btn.getBoundingClientRect();
-        content.style.left = (rect.left - 50) + 'px';
-        content.style.top = (rect.bottom + 5) + 'px';
-        content.style.display = 'block';
-    }
-}
-
-// Close fixed dropdowns when clicking outside
-document.addEventListener('click', function(e) {
-    if (!e.target.closest('.dropdown-toggle') && !e.target.closest('.fixed-dropdown-content')) {
-        document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
-            el.style.display = 'none';
-        });
-    }
-});
-
-// Close fixed dropdowns on scroll
-window.addEventListener('scroll', function() {
-    document.querySelectorAll('.fixed-dropdown-content').forEach(function(el) {
-        el.style.display = 'none';
-    });
         }
     </script>
 </body>
