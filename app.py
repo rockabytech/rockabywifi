@@ -1719,17 +1719,17 @@ def super_admin_dashboard():
             <td>UGX {monthly_fee:,}</td>
             <td>{voucher_count}</td>
             <td>{expiry}</td>
-            <td style="overflow:visible;">
-                <div class="dropdown" style="position:relative;display:inline-block;">
+            <td style="overflow:visible; position:relative;">
+                <div class="dropdown" style="position:relative;display:inline-block;z-index:9999999;">
                     <button class="btn btn-small dropdown-toggle" onclick="event.stopPropagation(); toggleDropdown(this);">&#8942;</button>
-                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:200px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;">
-                        <a href="/admin/impersonate/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
-                        <a href="/admin/extend/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
-                        <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-edit"></i> Edit</a>
-                        <a href="/admin/invoice/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
-                        <a href="/admin/message/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-envelope"></i> Message</a>
-                        <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
-                        <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;white-space:nowrap;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
+                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;min-width:220px;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.3);z-index:99999999;overflow:visible;padding:5px 0;pointer-events:auto;">
+                        <a href="/admin/impersonate/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-user-secret"></i> Impersonate</a>
+                        <a href="/admin/extend/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-calendar-plus"></i> Extend</a>
+                        <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-edit"></i> Edit</a>
+                        <a href="/admin/invoice/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
+                        <a href="/admin/message/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-envelope"></i> Message</a>
+                        <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
+                        <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;white-space:nowrap;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
                     </div>
                 </div>
             </td>
@@ -1754,23 +1754,27 @@ def super_admin_dashboard():
     </div>
     <div class="card">
         <div class="card-header">Provider Management <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a></div>
-        <table>
-            <thead>
-                <tr>
-                    <th>ID</th><th>Name</th><th>Contact</th><th>Status</th>
-                    <th>Revenue</th><th>Total Fee</th><th>Fee/Mo</th>
-                    <th>Vouchers</th><th>Expiry</th><th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>{rows}</tbody>
-        </table>
+        <div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th><th>Name</th><th>Contact</th><th>Status</th>
+                        <th>Revenue</th><th>Total Fee</th><th>Fee/Mo</th>
+                        <th>Vouchers</th><th>Expiry</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+            </table>
+        </div>
     </div>
     <div class="card">
         <div class="card-header">🕒 Recent Activity</div>
-        <table>
-            <thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead>
-            <tbody>{audit_rows}</tbody>
-        </table>
+        <div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+            <table>
+                <thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead>
+                <tbody>{audit_rows}</tbody>
+            </table>
+        </div>
     </div>
     <p style="margin-top:20px;"><a href="/admin/logout" class="btn btn-outline">Logout</a></p>
     '''
