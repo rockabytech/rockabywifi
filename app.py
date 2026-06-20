@@ -273,7 +273,8 @@ def yo_charge(phone, amount, plan_name, provider):
 # ------------------------------------------------------------
 # BASE TEMPLATE – Glassmorphism + Dark Mode
 # ------------------------------------------------------------
-<!DOCTYPE html>"""
+base_template = """
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
