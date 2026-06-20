@@ -698,13 +698,79 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False):
 def home():
     pid = request.args.get('pid', 1, type=int)
     p = get_provider(pid)
-    if not p: return "Provider not found.", 404
+    if not p:
+        return "Provider not found.", 404
+
+    # ----- Get the selected theme -----
+    theme = get_setting(pid, 'captive_portal_theme', 'classic')
+
+    # ----- Define theme CSS overrides (inline) -----
+    theme_css = {
+        'classic': '''
+            /* Classic – clean blue & white */
+            :root {
+                --primary: #1a73e8;
+                --primary-dark: #1557b0;
+                --bg: #f0f4f8;
+                --card-bg: rgba(255,255,255,0.85);
+                --text: #1a1a1a;
+                --text-secondary: #666666;
+                --border: #e0e0e0;
+                --shadow: 0 8px 32px rgba(0,0,0,0.08);
+            }
+            .hero h1 { background: linear-gradient(135deg, #1a73e8, #6366f1); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+            .btn { background: linear-gradient(135deg, #1a73e8, #6366f1); }
+        ''',
+        'modern': '''
+            /* Modern – dark & vibrant */
+            :root {
+                --primary: #f5af19;
+                --primary-dark: #d4940e;
+                --bg: #0f172a;
+                --card-bg: rgba(30,41,59,0.9);
+                --text: #f1f5f9;
+                --text-secondary: #94a3b8;
+                --border: #334155;
+                --shadow: 0 8px 32px rgba(0,0,0,0.5);
+            }
+            body { background: #0f172a; }
+            .hero { background: linear-gradient(135deg, rgba(245,175,25,0.2), rgba(26,115,232,0.1)) !important; }
+            .hero h1 { background: linear-gradient(135deg, #f5af19, #ff6b6b); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+            .btn { background: linear-gradient(135deg, #f5af19, #ff6b6b); }
+            .card { background: rgba(30,41,59,0.9); border: 1px solid rgba(255,255,255,0.08); }
+        ''',
+        'minimalist': '''
+            /* Minimalist – light & minimal */
+            :root {
+                --primary: #2c3e50;
+                --primary-dark: #1a252f;
+                --bg: #ffffff;
+                --card-bg: rgba(255,255,255,0.95);
+                --text: #2c3e50;
+                --text-secondary: #7f8c8d;
+                --border: #ecf0f1;
+                --shadow: 0 2px 10px rgba(0,0,0,0.05);
+            }
+            body { background: #ffffff; }
+            .hero { background: #f8f9fa !important; border: none !important; }
+            .hero h1 { background: linear-gradient(135deg, #2c3e50, #3498db); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+            .btn { background: #2c3e50; box-shadow: none; }
+            .card { box-shadow: none; border: 1px solid #ecf0f1; }
+        '''
+    }
+
+    # Build the <style> tag
+    style_tag = f'<style>{theme_css.get(theme, theme_css["classic"])}</style>'
+
+    # ----- Build the rest of the page (unchanged) -----
     bn = p['business_name'] if p else 'RockabyWiFi'
     logo = f'<img src="/static/uploads/{p["logo_image"]}" class="provider-logo" alt="{bn}">' if p and p['logo_image'] else ''
     poster = f'<img src="/static/uploads/{p["poster_image"]}" class="provider-poster" alt="Poster">' if p and p['poster_image'] else ''
-
     hero_logo = '<img src="/static/ug-06.png" alt="RockabyWiFi" style="height:80px; width:80px; border-radius:16px; object-fit:cover; margin-bottom:15px; box-shadow:0 4px 15px rgba(0,0,0,0.2);">'
-    content = f'''<div class="card" style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">{logo}<h2 style="margin:0;">{bn}</h2></div>{poster}
+
+    content = f'''
+    {style_tag}  <!-- INJECT THEME CSS HERE -->
+    <div class="card" style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">{logo}<h2 style="margin:0;">{bn}</h2></div>{poster}
     <div class="hero" style="background: linear-gradient(135deg, rgba(26,115,232,0.15), rgba(99,102,241,0.1)); border-radius:var(--radius); padding:40px; text-align:center; margin-bottom:30px; border:1px solid var(--glass-border);">
         {hero_logo}
         <h1 style="font-size:2.5rem; margin-bottom:15px; background:linear-gradient(135deg, var(--primary), #6366f1); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Fast & Reliable WiFi</h1>
@@ -713,7 +779,8 @@ def home():
     <div class="card"><div class="card-header">Choose a Plan</div>
     <form method="GET" action="/sms-verify"><input type="hidden" name="pid" value="{pid}"><label>Your Phone Number *</label><input type="tel" name="phone" required><label>Select Plan</label><select name="plan_id" required>{get_plan_options(pid)}</select><button type="submit" class="btn" style="margin-top:20px;width:100%;">Continue to Payment</button></form></div>
     <p style="text-align:center;margin-top:15px;"><a href="/redeem?pid={pid}" class="btn btn-outline">Already have a voucher?</a> <a href="/subscriber-login?pid={pid}" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a></p>
-    <p style="text-align:center;margin-top:10px;"><a href="/free-trial?pid={pid}" class="btn btn-outline" style="background: linear-gradient(135deg, #28a745, #51cf66); color:white; border:none;">🎁 Free 5-Minute Trial</a></p>'''
+    <p style="text-align:center;margin-top:10px;"><a href="/free-trial?pid={pid}" class="btn btn-outline" style="background: linear-gradient(135deg, #28a745, #51cf66); color:white; border:none;">🎁 Free 5-Minute Trial</a></p>
+    '''
     return render_page("Get Internet Access", content, get_pending_count(pid), pid, admin=False)
 
 @app.route('/free-trial')
