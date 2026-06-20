@@ -200,18 +200,6 @@ def get_weekly_platform_revenue(pid=1):
 def format_data(size_mb):
     return f"{size_mb/1000:.2f} GB" if size_mb>=1000 else f"{size_mb:.2f} MB"
 
-def seed_sample_data():
-    db=get_db()
-    if db.execute("SELECT COUNT(*) as c FROM data_sessions WHERE provider_id=1").fetchone()['c']>0: return
-    today=date.today(); plans=db.execute("SELECT id,price_ugx FROM plans WHERE provider_id=1 AND is_active=1 AND is_public=1").fetchall(); phones=['0771234567','0772345678','0773456789','0751111111','0752222222']
-    for i in range(60):
-        d=today-timedelta(days=i)
-        for _ in range(random.randint(1,5)): db.execute("INSERT INTO data_sessions (provider_id,phone_number,session_date,data_download,data_upload) VALUES (1,?,?,?,?)",(random.choice(phones),d.isoformat(),round(random.uniform(10,1500),2),round(random.uniform(2,500),2)))
-        db.execute("INSERT INTO sms_log (provider_id,phone_number,message) VALUES (1,?,?)",(random.choice(phones),"Payment SMS "+str(i)))
-        db.execute("INSERT INTO user_activity (provider_id,phone_number,action) VALUES (1,?,?)",(random.choice(phones),random.choice(['login','logout','voucher_purchased'])))
-        plan=random.choice(plans); db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used) VALUES (1,?,?,'sms',?,?)",(generate_voucher_code(),plan['id'],random.choice(phones),1 if random.random()>0.3 else 0))
-    db.commit()
-
 def yo_charge(phone, amount, plan_name, provider):
     if not provider['yo_username'] or not provider['yo_password']: return None
     ref = f"ROCK-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(1000,9999)}"
@@ -773,39 +761,334 @@ def logout(): session.clear(); return redirect('/')
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    pid = session['provider_id']; db = get_db(); seed_sample_data()
-    today = date.today(); ms = today.replace(day=1).isoformat()
-    rev = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ?",(pid,ms)).fetchone()['t']
-    total_clients = db.execute("SELECT COUNT(DISTINCT phone_number) as c FROM vouchers WHERE provider_id=?",(pid,)).fetchone()['c']
-    active_now = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=? AND used=0",(pid,)).fetchone()['c']
+    pid = session['provider_id']
+    db = get_db()
+    # seed_sample_data() removed – no more fake data
 
-    pkg_perf = db.execute("""SELECT p.name, p.price_ugx, COUNT(v.id) as active_users, COALESCE(SUM(p.price_ugx),0) as monthly_rev, COALESCE(AVG(COALESCE(ds.data_download+ds.data_upload,0)),0) as avg_data FROM plans p LEFT JOIN vouchers v ON v.plan_id=p.id AND v.used=0 LEFT JOIN data_sessions ds ON ds.phone_number=v.phone_number WHERE p.provider_id=? AND p.is_active=1 AND p.is_public=1 GROUP BY p.id ORDER BY monthly_rev DESC""",(pid,)).fetchall()
+    today = date.today()
+    ms = today.replace(day=1).isoformat()
+
+    rev = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) as t FROM voucher_requests "
+        "WHERE provider_id = ? AND status = 'approved' AND date(created_at) >= ?",
+        (pid, ms)
+    ).fetchone()['t']
+
+    total_clients = db.execute(
+        "SELECT COUNT(DISTINCT phone_number) as c FROM vouchers WHERE provider_id = ?",
+        (pid,)
+    ).fetchone()['c']
+
+    active_now = db.execute(
+        "SELECT COUNT(*) as c FROM vouchers WHERE provider_id = ? AND used = 0",
+        (pid,)
+    ).fetchone()['c']
+
+    pkg_perf = db.execute("""
+        SELECT p.name, p.price_ugx, COUNT(v.id) as active_users,
+               COALESCE(SUM(p.price_ugx), 0) as monthly_rev,
+               COALESCE(AVG(COALESCE(ds.data_download + ds.data_upload, 0)), 0) as avg_data
+        FROM plans p
+        LEFT JOIN vouchers v ON v.plan_id = p.id AND v.used = 0
+        LEFT JOIN data_sessions ds ON ds.phone_number = v.phone_number
+        WHERE p.provider_id = ? AND p.is_active = 1 AND p.is_public = 1
+        GROUP BY p.id
+        ORDER BY monthly_rev DESC
+    """, (pid,)).fetchall()
+
     pkg_rows = ''
     for pr in pkg_perf:
-        arpu = int(pr['monthly_rev'])/int(pr['active_users']) if int(pr['active_users']) > 0 else 0
-        pkg_rows += f'<tr><td>{pr["name"]}</td><td>UGX {pr["price_ugx"]:,}</td><td>{pr["active_users"]}</td><td>UGX {pr["monthly_rev"]:,}</td><td>{format_data(pr["avg_data"])}</td><td>UGX {arpu:,.0f}</td></tr>'
-    if not pkg_rows: pkg_rows = '<tr><td colspan="6">No packages yet.</td></tr>'
+        arpu = int(pr['monthly_rev']) / int(pr['active_users']) if int(pr['active_users']) > 0 else 0
+        pkg_rows += f'''
+        <tr>
+            <td>{pr["name"]}</td>
+            <td>UGX {pr["price_ugx"]:,}</td>
+            <td>{pr["active_users"]}</td>
+            <td>UGX {pr["monthly_rev"]:,}</td>
+            <td>{format_data(pr["avg_data"])}</td>
+            <td>UGX {arpu:,.0f}</td>
+        </tr>'''
+    if not pkg_rows:
+        pkg_rows = '<tr><td colspan="6">No packages yet.</td></tr>'
 
-    content = f"""<div class="stat-grid"><div class="stat-card"><h3>UGX {rev or 0:,}</h3><small>Amount this month</small></div><div class="stat-card"><h3>{total_clients}</h3><small>Total clients</small></div><div class="stat-card"><h3>{active_now}</h3><small>Active now</small></div></div>
-    <div class="chart-row"><div class="card"><div class="card-header">📊 Payments <select id="pp" onchange="loadPay()" style="width:auto;display:inline;"><option value="today">Today</option><option value="this_week">This Week</option><option value="last_week">Last Week</option><option value="this_month">This Month</option><option value="last_month">Last Month</option><option value="this_year">This Year</option><option value="last_year">Last Year</option></select></div><div class="chart-container"><canvas id="payChart"></canvas></div></div><div class="card"><div class="card-header">👥 Active Users <small>Now: {active_now}</small></div><div class="chart-container"><canvas id="auChart"></canvas></div></div></div>
-    <div class="chart-row"><div class="card"><div class="card-header">📈 Customer Retention</div><div class="chart-container"><canvas id="retChart"></canvas></div></div><div class="card"><div class="card-header">📅 Data Usage</div><div class="chart-container"><canvas id="duChart"></canvas></div></div></div>
-    <div class="chart-row"><div class="card"><div class="card-header">📦 Package Utilization</div><div class="chart-container"><canvas id="pkgChart"></canvas></div></div><div class="card"><div class="card-header">🔮 Revenue Forecast</div><div class="chart-container"><canvas id="fcChart"></canvas></div></div></div>
-    <div class="chart-row"><div class="card"><div class="card-header">📱 Sent SMS</div><div class="chart-container"><canvas id="smsChart"></canvas></div></div><div class="card"><div class="card-header">📶 Network Usage</div><div class="chart-container"><canvas id="netChart"></canvas></div></div></div>
-    <div class="chart-row"><div class="card"><div class="card-header">📋 Registrations</div><div class="chart-container"><canvas id="regChart"></canvas></div></div><div class="card"><div class="card-header">⭐ Most Active</div><table><thead><tr><th>Username</th><th>Data</th><th>Phone</th></tr></thead><tbody id="maTable"></tbody></table></div></div>
-    <div class="card"><div class="card-header">🏆 Package Performance</div><table><thead><tr><th>Package</th><th>Price</th><th>Active</th><th>Monthly Rev</th><th>Avg Data</th><th>ARPU</th></tr></thead><tbody>{pkg_rows}</tbody></table></div>
+    content = f'''
+    <div class="stat-grid">
+        <div class="stat-card"><h3>UGX {rev or 0:,}</h3><small>Amount this month</small></div>
+        <div class="stat-card"><h3>{total_clients}</h3><small>Total clients</small></div>
+        <div class="stat-card"><h3>{active_now}</h3><small>Active now</small></div>
+    </div>
+
+    <div class="chart-row">
+        <div class="card">
+            <div class="card-header">📊 Payments <select id="pp" onchange="loadPay()" style="width:auto;display:inline;">
+                <option value="today">Today</option>
+                <option value="this_week">This Week</option>
+                <option value="last_week">Last Week</option>
+                <option value="this_month">This Month</option>
+                <option value="last_month">Last Month</option>
+                <option value="this_year">This Year</option>
+                <option value="last_year">Last Year</option>
+            </select></div>
+            <div class="chart-container"><canvas id="payChart"></canvas></div>
+        </div>
+        <div class="card">
+            <div class="card-header">👥 Active Users <small>Now: {active_now}</small></div>
+            <div class="chart-container"><canvas id="auChart"></canvas></div>
+        </div>
+    </div>
+
+    <div class="chart-row">
+        <div class="card">
+            <div class="card-header">📈 Customer Retention</div>
+            <div class="chart-container"><canvas id="retChart"></canvas></div>
+        </div>
+        <div class="card">
+            <div class="card-header">📅 Data Usage</div>
+            <div class="chart-container"><canvas id="duChart"></canvas></div>
+        </div>
+    </div>
+
+    <div class="chart-row">
+        <div class="card">
+            <div class="card-header">📦 Package Utilization</div>
+            <div class="chart-container"><canvas id="pkgChart"></canvas></div>
+        </div>
+        <div class="card">
+            <div class="card-header">🔮 Revenue Forecast</div>
+            <div class="chart-container"><canvas id="fcChart"></canvas></div>
+        </div>
+    </div>
+
+    <div class="chart-row">
+        <div class="card">
+            <div class="card-header">📱 Sent SMS</div>
+            <div class="chart-container"><canvas id="smsChart"></canvas></div>
+        </div>
+        <div class="card">
+            <div class="card-header">📶 Network Usage</div>
+            <div class="chart-container"><canvas id="netChart"></canvas></div>
+        </div>
+    </div>
+
+    <div class="chart-row">
+        <div class="card">
+            <div class="card-header">📋 Registrations</div>
+            <div class="chart-container"><canvas id="regChart"></canvas></div>
+        </div>
+        <div class="card">
+            <div class="card-header">⭐ Most Active</div>
+            <table><thead><tr><th>Username</th><th>Data</th><th>Phone</th></tr></thead><tbody id="maTable"></tbody></table>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">🏆 Package Performance</div>
+        <table>
+            <thead><tr><th>Package</th><th>Price</th><th>Active</th><th>Monthly Rev</th><th>Avg Data</th><th>ARPU</th></tr></thead>
+            <tbody>{pkg_rows}</tbody>
+        </table>
+    </div>
+
     <script>
-    async function loadPay(){{ var p=document.getElementById('pp').value; var r=await fetch('/api/payments?period='+p); var d=await r.json(); var ctx=document.getElementById('payChart').getContext('2d'); if(window.pc)window.pc.destroy(); window.pc=new Chart(ctx,{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'Payments (UGX)',data:d.values,backgroundColor:'rgba(26,115,232,0.7)',borderColor:'#1a73e8',borderWidth:2,borderRadius:8}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}}}}}}); }}
-    fetch('/api/active-users-chart').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('auChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'Active',data:d.values,borderColor:'#1a73e8',backgroundColor:'rgba(26,115,232,0.1)',fill:true,tension:0.4,pointRadius:6,pointBackgroundColor:'#1a73e8'}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}}}}}}); }});
-    fetch('/api/retention').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('retChart').getContext('2d'),{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'New',data:d.new_cust,backgroundColor:'rgba(26,115,232,0.7)',borderRadius:6}},{{label:'Returning',data:d.returning,backgroundColor:'rgba(81,207,102,0.7)',borderRadius:6}},{{label:'Churned',data:d.churned,backgroundColor:'rgba(255,107,107,0.7)',borderRadius:6}}]}},options:{{responsive:true,maintainAspectRatio:false,scales:{{x:{{stacked:true}},y:{{stacked:true}}}}}}}}); }});
-    fetch('/api/data-usage').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('duChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'Download',data:d.downloads,borderColor:'#1a73e8',backgroundColor:'rgba(26,115,232,0.1)',fill:true,tension:0.4}},{{label:'Upload',data:d.uploads,borderColor:'#ffd43b',backgroundColor:'rgba(255,212,59,0.1)',fill:true,tension:0.4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{tooltip:{{callbacks:{{label:function(c){{return c.dataset.label+': '+(c.raw>=1000?(c.raw/1000).toFixed(2)+' GB':c.raw.toFixed(2)+' MB');}}}}}}}}}}); }});
-    fetch('/api/package-util').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('pkgChart').getContext('2d'),{{type:'doughnut',data:{{labels:d.labels,datasets:[{{data:d.values,backgroundColor:['#1a73e8','#51cf66','#ffd43b','#ff6b6b','#6366f1','#fd7e14'],borderWidth:0,borderRadius:4}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{position:'bottom'}}}}}}}}); }});
-    fetch('/api/forecast').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('fcChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'Historical',data:d.historical,borderColor:'#1a73e8',fill:false,tension:0.4}},{{label:'Forecast',data:d.forecast,borderColor:'#51cf66',borderDash:[6,3],fill:false,tension:0.4}},{{label:'Upper',data:d.upper,borderColor:'rgba(255,107,107,0.3)',borderDash:[2,2],fill:false,pointRadius:0}},{{label:'Lower',data:d.lower,borderColor:'rgba(255,107,107,0.3)',borderDash:[2,2],fill:false,pointRadius:0}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{position:'bottom'}}}}}}}}); }});
-    fetch('/api/sms-stats').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('smsChart').getContext('2d'),{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'SMS',data:d.values,backgroundColor:'rgba(99,102,241,0.7)',borderColor:'#6366f1',borderWidth:2,borderRadius:6}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}}}}}}); }});
-    fetch('/api/network').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('netChart').getContext('2d'),{{type:'bar',data:{{labels:d.labels,datasets:[{{label:'Download',data:d.downloads,backgroundColor:'rgba(26,115,232,0.7)',borderRadius:6}},{{label:'Upload',data:d.uploads,backgroundColor:'rgba(255,212,59,0.7)',borderRadius:6}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{tooltip:{{callbacks:{{label:function(c){{return c.dataset.label+': '+(c.raw>=1000?(c.raw/1000).toFixed(2)+' GB':c.raw.toFixed(2)+' MB');}}}}}}}}}}); }});
-    fetch('/api/registration').then(r=>r.json()).then(d=>{{ new Chart(document.getElementById('regChart').getContext('2d'),{{type:'line',data:{{labels:d.labels,datasets:[{{label:'Registrations',data:d.values,borderColor:'#ff6b6b',backgroundColor:'rgba(255,107,107,0.1)',fill:true,tension:0.4,pointRadius:6,pointBackgroundColor:'#ff6b6b'}}]}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}}}}}}}}); }});
-    fetch('/api/most-active').then(r=>r.json()).then(d=>{{ var rows=''; d.forEach(u=>{{ rows+=`<tr><td>${{u.username}}</td><td>${{u.data_usage}}</td><td>${{u.phone}}</td></tr>`; }}); document.getElementById('maTable').innerHTML=rows; }});
+    async function loadPay() {
+        var p = document.getElementById('pp').value;
+        var r = await fetch('/api/payments?period=' + p);
+        var d = await r.json();
+        var ctx = document.getElementById('payChart').getContext('2d');
+        if (window.pc) window.pc.destroy();
+        window.pc = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: d.labels,
+                datasets: [{
+                    label: 'Payments (UGX)',
+                    data: d.values,
+                    backgroundColor: 'rgba(26,115,232,0.7)',
+                    borderColor: '#1a73e8',
+                    borderWidth: 2,
+                    borderRadius: 8
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        });
+    }
+
+    fetch('/api/active-users-chart').then(r => r.json()).then(d => {
+        new Chart(document.getElementById('auChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: d.labels,
+                datasets: [{
+                    label: 'Active',
+                    data: d.values,
+                    borderColor: '#1a73e8',
+                    backgroundColor: 'rgba(26,115,232,0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 6,
+                    pointBackgroundColor: '#1a73e8'
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        });
+    });
+
+    fetch('/api/retention').then(r => r.json()).then(d => {
+        new Chart(document.getElementById('retChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: d.labels,
+                datasets: [
+                    { label: 'New', data: d.new_cust, backgroundColor: 'rgba(26,115,232,0.7)', borderRadius: 6 },
+                    { label: 'Returning', data: d.returning, backgroundColor: 'rgba(81,207,102,0.7)', borderRadius: 6 },
+                    { label: 'Churned', data: d.churned, backgroundColor: 'rgba(255,107,107,0.7)', borderRadius: 6 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { x: { stacked: true }, y: { stacked: true } }
+            }
+        });
+    });
+
+    fetch('/api/data-usage').then(r => r.json()).then(d => {
+        new Chart(document.getElementById('duChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: d.labels,
+                datasets: [
+                    { label: 'Download', data: d.downloads, borderColor: '#1a73e8', backgroundColor: 'rgba(26,115,232,0.1)', fill: true, tension: 0.4 },
+                    { label: 'Upload', data: d.uploads, borderColor: '#ffd43b', backgroundColor: 'rgba(255,212,59,0.1)', fill: true, tension: 0.4 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(c) {
+                                return c.dataset.label + ': ' + (c.raw >= 1000 ? (c.raw/1000).toFixed(2) + ' GB' : c.raw.toFixed(2) + ' MB');
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    fetch('/api/package-util').then(r => r.json()).then(d => {
+        new Chart(document.getElementById('pkgChart').getContext('2d'), {
+            type: 'doughnut',
+            data: {
+                labels: d.labels,
+                datasets: [{
+                    data: d.values,
+                    backgroundColor: ['#1a73e8', '#51cf66', '#ffd43b', '#ff6b6b', '#6366f1', '#fd7e14'],
+                    borderWidth: 0,
+                    borderRadius: 4
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+        });
+    });
+
+    fetch('/api/forecast').then(r => r.json()).then(d => {
+        new Chart(document.getElementById('fcChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: d.labels,
+                datasets: [
+                    { label: 'Historical', data: d.historical, borderColor: '#1a73e8', fill: false, tension: 0.4 },
+                    { label: 'Forecast', data: d.forecast, borderColor: '#51cf66', borderDash: [6, 3], fill: false, tension: 0.4 },
+                    { label: 'Upper', data: d.upper, borderColor: 'rgba(255,107,107,0.3)', borderDash: [2, 2], fill: false, pointRadius: 0 },
+                    { label: 'Lower', data: d.lower, borderColor: 'rgba(255,107,107,0.3)', borderDash: [2, 2], fill: false, pointRadius: 0 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } }
+            }
+        });
+    });
+
+    fetch('/api/sms-stats').then(r => r.json()).then(d => {
+        new Chart(document.getElementById('smsChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: d.labels,
+                datasets: [{
+                    label: 'SMS',
+                    data: d.values,
+                    backgroundColor: 'rgba(99,102,241,0.7)',
+                    borderColor: '#6366f1',
+                    borderWidth: 2,
+                    borderRadius: 6
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        });
+    });
+
+    fetch('/api/network').then(r => r.json()).then(d => {
+        new Chart(document.getElementById('netChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: d.labels,
+                datasets: [
+                    { label: 'Download', data: d.downloads, backgroundColor: 'rgba(26,115,232,0.7)', borderRadius: 6 },
+                    { label: 'Upload', data: d.uploads, backgroundColor: 'rgba(255,212,59,0.7)', borderRadius: 6 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(c) {
+                                return c.dataset.label + ': ' + (c.raw >= 1000 ? (c.raw/1000).toFixed(2) + ' GB' : c.raw.toFixed(2) + ' MB');
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    fetch('/api/registration').then(r => r.json()).then(d => {
+        new Chart(document.getElementById('regChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: d.labels,
+                datasets: [{
+                    label: 'Registrations',
+                    data: d.values,
+                    borderColor: '#ff6b6b',
+                    backgroundColor: 'rgba(255,107,107,0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 6,
+                    pointBackgroundColor: '#ff6b6b'
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        });
+    });
+
+    fetch('/api/most-active').then(r => r.json()).then(d => {
+        var rows = '';
+        d.forEach(u => {
+            rows += `<tr><td>${u.username}</td><td>${u.data_usage}</td><td>${u.phone}</td></tr>`;
+        });
+        document.getElementById('maTable').innerHTML = rows;
+    });
+
     loadPay();
-    </script>"""
+    </script>
+    '''
     return render_page("Dashboard", content, get_pending_count(pid), pid, admin=True)
 
 # ------------------------------------------------------------
@@ -814,51 +1097,126 @@ def dashboard():
 @app.route('/api/payments')
 @login_required
 def api_payments():
-    period = request.args.get('period','this_month'); db = get_db(); today = date.today(); pid = session['provider_id']
-    if period == 'today': dates = [today]
-    elif period == 'this_week': dates = [(today - timedelta(days=i)) for i in range(6,-1,-1)]
-    elif period == 'last_week': lm = today - timedelta(days=today.weekday()+7); dates = [lm+timedelta(days=i) for i in range(7)]
-    elif period == 'this_month': dates = [today.replace(day=1)+timedelta(days=i) for i in range(today.day)]
-    elif period == 'last_month': first = (today.replace(day=1)-timedelta(days=1)).replace(day=1); ld = (first.replace(month=first.month%12+1,day=1)-timedelta(days=1)).day; dates = [first+timedelta(days=i) for i in range(ld)]
+    period = request.args.get('period', 'this_month')
+    pid = session['provider_id']
+    db = get_db()
+    today = date.today()
+
+    # Determine date range based on period
+    if period == 'today':
+        start_date = today
+        end_date = today
+    elif period == 'this_week':
+        start_date = today - timedelta(days=today.weekday())
+        end_date = today
+    elif period == 'last_week':
+        start_date = today - timedelta(days=today.weekday() + 7)
+        end_date = start_date + timedelta(days=6)
+    elif period == 'this_month':
+        start_date = today.replace(day=1)
+        end_date = today
+    elif period == 'last_month':
+        start_date = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
+        end_date = (start_date.replace(month=start_date.month % 12 + 1, day=1) - timedelta(days=1))
     elif period == 'this_year':
-        months = [today.replace(month=m,day=1) for m in range(1,today.month+1)]
-        rows = db.execute("SELECT strftime('%m',created_at) as m, COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) >= ? GROUP BY m",(pid,today.replace(month=1,day=1).isoformat())).fetchall()
-        labels = [d.strftime('%b') for d in months]; values = [0]*len(months)
-        for r in rows:
-            idx = int(r['m'])-1
-            if idx < len(values): values[idx] = r['t']
-        return {'labels':labels,'values':values}
+        start_date = today.replace(month=1, day=1)
+        end_date = today
     elif period == 'last_year':
-        months = [today.replace(year=today.year-1,month=m,day=1) for m in range(1,13)]
-        rows = db.execute("SELECT strftime('%m',created_at) as m, COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at) BETWEEN ? AND ?",(pid,today.replace(year=today.year-1,month=1,day=1).isoformat(),today.replace(year=today.year-1,month=12,day=31).isoformat())).fetchall()
-        labels = [d.strftime('%b') for d in months]; values = [0]*12
-        for r in rows:
-            idx = int(r['m'])-1
-            if idx < 12: values[idx] = r['t']
-        return {'labels':labels,'values':values}
-    else: dates = [today.replace(day=1)+timedelta(days=i) for i in range(today.day)]
-    labels = [d.strftime('%d %b') for d in dates] if len(dates)>1 else [today.strftime('%d %b')]
-    vals = [db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE provider_id=? AND status='approved' AND date(created_at)=?",(pid,d.isoformat())).fetchone()['t'] for d in dates]
-    return {'labels':labels,'values':vals}
+        start_date = today.replace(year=today.year - 1, month=1, day=1)
+        end_date = today.replace(year=today.year - 1, month=12, day=31)
+    else:
+        start_date = today.replace(day=1)
+        end_date = today
+
+    # Generate list of dates
+    delta = end_date - start_date
+    dates = [start_date + timedelta(days=i) for i in range(delta.days + 1)]
+    labels = [d.strftime('%d %b') for d in dates]
+
+    # Query payments per day
+    values = []
+    for d in dates:
+        amount = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) as total FROM voucher_requests "
+            "WHERE provider_id = ? AND status = 'approved' AND date(created_at) = ?",
+            (pid, d.isoformat())
+        ).fetchone()['total']
+        values.append(amount)
+
+    return {'labels': labels, 'values': values}
 
 @app.route('/api/active-users-chart')
 @login_required
 def api_active_users():
-    db = get_db(); today = date.today(); pid = session['provider_id']
-    labels = [(today-timedelta(days=i)).strftime('%a') for i in range(6,-1,-1)]
-    vals = []
-    for i in range(6,-1,-1):
-        d = today-timedelta(days=i)
-        v_cnt = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=? AND used=1 AND date(used_at)=?",(pid,d.isoformat())).fetchone()['c']
-        s_cnt = db.execute("SELECT COUNT(*) as c FROM sessions WHERE provider_id=? AND date(started_at)=?",(pid,d.isoformat())).fetchone()['c']
-        vals.append(v_cnt + s_cnt)
-    return {'labels':labels,'values':vals}
+    pid = session['provider_id']
+    db = get_db()
+    today = date.today()
+    labels = [(today - timedelta(days=i)).strftime('%a') for i in range(6, -1, -1)]
+
+    values = []
+    for i in range(6, -1, -1):
+        d = today - timedelta(days=i)
+        # Count vouchers that are unused (active)
+        v_cnt = db.execute(
+            "SELECT COUNT(*) as c FROM vouchers WHERE provider_id = ? AND used = 0 AND date(created_at) <= ?",
+            (pid, d.isoformat())
+        ).fetchone()['c']
+        # Count active sessions (started before end of day and not ended)
+        s_cnt = db.execute(
+            "SELECT COUNT(*) as c FROM sessions WHERE provider_id = ? AND date(started_at) <= ? AND (ended_at IS NULL OR date(ended_at) >= ?)",
+            (pid, d.isoformat(), d.isoformat())
+        ).fetchone()['c']
+        values.append(v_cnt + s_cnt)
+
+    return {'labels': labels, 'values': values}
 
 @app.route('/api/retention')
 @login_required
 def api_retention():
-    today = date.today(); labels = [(today-timedelta(days=30*i)).strftime('%b %Y') for i in range(5,-1,-1)]
-    return {'labels':labels,'new_cust':[random.randint(5,20) for _ in range(6)],'returning':[random.randint(10,40) for _ in range(6)],'churned':[random.randint(2,10) for _ in range(6)]}
+    pid = session['provider_id']
+    db = get_db()
+    today = date.today()
+
+    # We'll calculate for the last 6 months
+    labels = [(today - timedelta(days=30 * i)).strftime('%b %Y') for i in range(5, -1, -1)]
+    new_cust = []
+    returning = []
+    churned = []
+
+    for i in range(5, -1, -1):
+        month_start = (today - timedelta(days=30 * i)).replace(day=1)
+        next_month = (month_start.replace(month=month_start.month % 12 + 1, day=1) if month_start.month < 12 else month_start.replace(year=month_start.year + 1, month=1, day=1))
+        # New customers: first voucher purchase in this month
+        new = db.execute(
+            "SELECT COUNT(DISTINCT phone_number) as c FROM vouchers "
+            "WHERE provider_id = ? AND date(created_at) >= ? AND date(created_at) < ? AND phone_number IS NOT NULL",
+            (pid, month_start.isoformat(), next_month.isoformat())
+        ).fetchone()['c']
+        # Returning: customers who had a voucher in previous month and again in this month
+        prev_month_start = (month_start - timedelta(days=1)).replace(day=1)
+        prev_month_end = month_start - timedelta(days=1)
+        returning_count = db.execute(
+            "SELECT COUNT(DISTINCT v2.phone_number) as c FROM vouchers v1 JOIN vouchers v2 ON v1.phone_number = v2.phone_number "
+            "WHERE v1.provider_id = ? AND v2.provider_id = ? "
+            "AND date(v1.created_at) >= ? AND date(v1.created_at) <= ? "
+            "AND date(v2.created_at) >= ? AND date(v2.created_at) < ?",
+            (pid, pid, prev_month_start.isoformat(), prev_month_end.isoformat(), month_start.isoformat(), next_month.isoformat())
+        ).fetchone()['c']
+        # Churned: customers who had a voucher in previous month but not this month
+        churned_count = db.execute(
+            "SELECT COUNT(DISTINCT phone_number) as c FROM vouchers v1 "
+            "WHERE v1.provider_id = ? AND date(v1.created_at) >= ? AND date(v1.created_at) <= ? "
+            "AND v1.phone_number NOT IN ("
+            "    SELECT DISTINCT phone_number FROM vouchers v2 "
+            "    WHERE v2.provider_id = ? AND date(v2.created_at) >= ? AND date(v2.created_at) < ?"
+            ")",
+            (pid, prev_month_start.isoformat(), prev_month_end.isoformat(), pid, month_start.isoformat(), next_month.isoformat())
+        ).fetchone()['c']
+        new_cust.append(new)
+        returning.append(returning_count)
+        churned.append(churned_count)
+
+    return {'labels': labels, 'new_cust': new_cust, 'returning': returning, 'churned': churned}
 
 @app.route('/api/data-usage')
 @login_required
@@ -874,17 +1232,56 @@ def api_data_usage():
 @app.route('/api/package-util')
 @login_required
 def api_package_util():
-    db = get_db(); pid = session['provider_id']
-    rows = db.execute("SELECT p.name, COUNT(*) as c FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.provider_id=? AND date(v.created_at)=? GROUP BY p.name",(pid,date.today().isoformat())).fetchall()
-    return {'labels':[r['name'] for r in rows] or ['No sales'],'values':[r['c'] for r in rows] or [1]}
-
+    pid = session['provider_id']
+    db = get_db()
+    # Count vouchers grouped by plan name for today
+    rows = db.execute(
+        "SELECT p.name, COUNT(v.id) as cnt FROM vouchers v JOIN plans p ON v.plan_id = p.id "
+        "WHERE v.provider_id = ? AND date(v.created_at) = date('now') "
+        "GROUP BY p.name ORDER BY cnt DESC",
+        (pid,)
+    ).fetchall()
+    if not rows:
+        return {'labels': ['No Sales'], 'values': [1]}
+    labels = [r['name'] for r in rows]
+    values = [r['cnt'] for r in rows]
+    return {'labels': labels, 'values': values}
+    
 @app.route('/api/forecast')
 @login_required
 def api_forecast():
-    today = date.today(); labels = [(today+timedelta(days=i)).strftime('%d %b') for i in range(-30,90)]
-    hist = [random.randint(5000,20000) for _ in range(30)]; fc = [None]*30 + [random.randint(12000,25000) for _ in range(90)]
-    up = [None]*30 + [f+random.randint(2000,5000) for f in fc[30:]]; lo = [None]*30 + [f-random.randint(2000,5000) for f in fc[30:]]
-    return {'labels':labels,'historical':hist,'forecast':fc,'upper':up,'lower':lo}
+    pid = session['provider_id']
+    db = get_db()
+    today = date.today()
+
+    # Historical: last 30 days
+    hist_dates = [(today - timedelta(days=i)) for i in range(29, -1, -1)]
+    hist_values = []
+    for d in hist_dates:
+        total = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) as total FROM voucher_requests "
+            "WHERE provider_id = ? AND status = 'approved' AND date(created_at) = ?",
+            (pid, d.isoformat())
+        ).fetchone()['total']
+        hist_values.append(total)
+
+    # Forecast: simple average of last 7 days projected for next 30 days
+    last_7 = hist_values[-7:] if len(hist_values) >= 7 else hist_values
+    avg_7 = sum(last_7) / len(last_7) if last_7 else 0
+    forecast_values = [avg_7] * 30
+    upper = [avg_7 * 1.2] * 30
+    lower = [avg_7 * 0.8] * 30
+
+    forecast_dates = [(today + timedelta(days=i)) for i in range(30)]
+    labels = [d.strftime('%d %b') for d in (hist_dates + forecast_dates)]
+
+    return {
+        'labels': labels,
+        'historical': hist_values + [None] * 30,
+        'forecast': [None] * 30 + forecast_values,
+        'upper': [None] * 30 + upper,
+        'lower': [None] * 30 + lower
+    }
 
 @app.route('/api/sms-stats')
 @login_required
