@@ -273,8 +273,7 @@ def yo_charge(phone, amount, plan_name, provider):
 # ------------------------------------------------------------
 # BASE TEMPLATE – Glassmorphism + Dark Mode
 # ------------------------------------------------------------
-base_template = """
-<!DOCTYPE html>
+<!DOCTYPE html>"""
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -315,19 +314,23 @@ base_template = """
         .sidebar-header {
             padding: 24px 20px; border-bottom:1px solid var(--glass-border);
             display:flex; align-items:center; gap:12px;
-            background: rgba(255,255,255,0.05);
+            background: linear-gradient(135deg, rgba(26,115,232,0.2), rgba(255,107,107,0.1));
         }
         .sidebar-header img { height:40px; width:40px; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.3); }
-        .sidebar-header h3 { font-size:1.3rem; font-weight:800; margin:0; }
+        .sidebar-header h3 { font-size:1.2rem; font-weight:700; letter-spacing:0.5px; }
         .sidebar-menu { padding:10px 0; }
         .sidebar-menu a {
             display:flex; align-items:center; gap:10px; padding:12px 24px; color:var(--text-secondary);
             text-decoration:none; transition:all 0.2s; font-size:0.9rem; border-left:3px solid transparent;
         }
         .sidebar-menu a:hover, .sidebar-menu a.active {
-            background:linear-gradient(90deg, rgba(245,175,25,0.15), transparent);
-            color:#f5af19; border-left-color:#f5af19;
+            background:rgba(26,115,232,0.08); color:var(--primary); border-left-color: var(--primary);
         }
+        .sidebar-menu a:hover, .sidebar-menu a.active {
+    background: linear-gradient(90deg, rgba(245,175,25,0.2), transparent);
+    color: #f5af19;
+    border-left-color: #f5af19;
+}
         .sidebar-menu .badge {
             background: linear-gradient(135deg, var(--primary), #6366f1);
             color:#fff; padding:2px 10px; border-radius:12px; font-size:0.75rem; margin-left:auto;
@@ -408,7 +411,7 @@ base_template = """
             border-bottom:1px solid var(--border); padding-bottom:14px;
             display:flex; justify-content:space-between; align-items:center;
         }
-        .stat-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:18px; margin-bottom:24px; }
+        .stat-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:18px; margin-bottom:24px; }
         .stat-card {
             background: linear-gradient(135deg, rgba(26,115,232,0.08), rgba(99,102,241,0.05));
             border-radius:var(--radius); padding:24px; box-shadow:var(--shadow);
@@ -459,7 +462,7 @@ base_template = """
         .remember-row input[type="checkbox"] { width:auto; margin-right:8px; }
         .copy-btn { background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-left: 10px; }
         
-        /* ========== DROPDOWN FIX ========== */
+        /* ========== DROPDOWN FIX (Hover-based) ========== */
         .card, .container, .main-content, .table-responsive, table, thead, tbody, tr, td, th {
             overflow: visible !important;
         }
@@ -537,6 +540,7 @@ base_template = """
             }
         }
     </style>
+    {theme_style}   <!-- INJECT THEME-SPECIFIC CSS HERE -->
 </head>
 <body class="{layout_class}">
     {sidebar_html}
@@ -598,7 +602,7 @@ base_template = """
 # ------------------------------------------------------------
 # RENDER_PAGE FUNCTION
 # ------------------------------------------------------------
-def render_page(title, content, pending_count=0, provider_id=1, admin=False):
+def render_page(title, content, pending_count=0, provider_id=1, admin=False, theme_style=''):
     provider = get_provider(provider_id)
     sp = provider['support_phone'] if provider and provider['support_phone'] else '256751318876'
     
