@@ -780,27 +780,51 @@ def logout(): session.clear(); return redirect('/')
 def dashboard():
     pid = session['provider_id']
     db = get_db()
-    # seed_sample_data() removed
-
     today = date.today()
-    ms = today.replace(day=1).isoformat()
-
-    rev = db.execute(
-        "SELECT COALESCE(SUM(amount), 0) as t FROM voucher_requests "
+    
+    # ---------- STAT CARDS ----------
+    # 1. Revenue this month
+    month_start = today.replace(day=1).isoformat()
+    amount_this_month = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) as total FROM voucher_requests "
         "WHERE provider_id = ? AND status = 'approved' AND date(created_at) >= ?",
-        (pid, ms)
-    ).fetchone()['t']
-
+        (pid, month_start)
+    ).fetchone()['total']
+    
+    # 2. Total unique clients (lifetime)
     total_clients = db.execute(
-        "SELECT COUNT(DISTINCT phone_number) as c FROM vouchers WHERE provider_id = ?",
+        "SELECT COUNT(DISTINCT phone_number) as total FROM vouchers WHERE provider_id = ?",
         (pid,)
-    ).fetchone()['c']
-
+    ).fetchone()['total']
+    
+    # 3. Active now (connected in last 15 minutes)
     active_now = db.execute(
-        "SELECT COUNT(*) as c FROM vouchers WHERE provider_id = ? AND used = 0",
+        "SELECT COUNT(*) as active FROM vouchers "
+        "WHERE provider_id = ? AND used = 1 AND used_at >= datetime('now', '-15 minutes')",
         (pid,)
-    ).fetchone()['c']
-
+    ).fetchone()['active']
+    
+    # 4. Active users in last 24 hours (unique)
+    active_users_24h = db.execute(
+        "SELECT COUNT(DISTINCT phone_number) as active FROM vouchers "
+        "WHERE provider_id = ? AND used = 1 AND used_at >= datetime('now', '-1 day')",
+        (pid,)
+    ).fetchone()['active']
+    
+    # Growth compared to previous month
+    last_month_start = (today.replace(day=1) - timedelta(days=1)).replace(day=1).isoformat()
+    last_month_amount = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) as total FROM voucher_requests "
+        "WHERE provider_id = ? AND status = 'approved' AND date(created_at) >= ? AND date(created_at) < ?",
+        (pid, last_month_start, month_start)
+    ).fetchone()['total']
+    if last_month_amount > 0:
+        growth = ((amount_this_month - last_month_amount) / last_month_amount) * 100
+        growth_text = f"+{growth:.0f}%" if growth >= 0 else f"{growth:.0f}%"
+    else:
+        growth_text = "New"
+    
+    # ---------- PACKAGE PERFORMANCE TABLE ----------
     pkg_perf = db.execute("""
         SELECT p.name, p.price_ugx, COUNT(v.id) as active_users,
                COALESCE(SUM(p.price_ugx), 0) as monthly_rev,
@@ -812,7 +836,7 @@ def dashboard():
         GROUP BY p.id
         ORDER BY monthly_rev DESC
     """, (pid,)).fetchall()
-
+    
     pkg_rows = ''
     for pr in pkg_perf:
         arpu = int(pr['monthly_rev']) / int(pr['active_users']) if int(pr['active_users']) > 0 else 0
@@ -827,21 +851,41 @@ def dashboard():
         </tr>'''
     if not pkg_rows:
         pkg_rows = '<tr><td colspan="6">No packages yet.</td></tr>'
-
+    
+    # ---------- RENDER CONTENT ----------
     content = f'''
+    <!-- STAT CARDS -->
     <div class="stat-grid">
-        <div class="stat-card"><h3>UGX {rev or 0:,}</h3><small>Amount this month</small></div>
-        <div class="stat-card"><h3>{total_clients}</h3><small>Total clients</small></div>
-        <div class="stat-card"><h3>{active_now}</h3><small>Active now</small></div>
+        <div class="stat-card">
+            <h3>UGX {amount_this_month or 0:,}</h3>
+            <small>Amount This Month</small>
+            <div style="font-size:0.75rem; color:#28a745;">{growth_text}</div>
+        </div>
+        <div class="stat-card">
+            <h3>{total_clients or 0}</h3>
+            <small>Total Clients</small>
+            <div style="font-size:0.75rem; color:var(--text-secondary);">🆕 Lifetime customers</div>
+        </div>
+        <div class="stat-card">
+            <h3>{active_now or 0}</h3>
+            <small>Active Now</small>
+            <div style="font-size:0.75rem; color:#28a745;">🟢 Online right now</div>
+        </div>
+        <div class="stat-card">
+            <h3>{active_users_24h or 0}</h3>
+            <small>Active Users (24h)</small>
+            <div style="font-size:0.75rem; color:var(--text-secondary);">📊 Daily active users</div>
+        </div>
     </div>
 
+    <!-- CHARTS ROW 1 -->
     <div class="chart-row">
         <div class="card">
             <div class="card-header">📊 Payments <select id="pp" onchange="loadPay()" style="width:auto;display:inline;">
                 <option value="today">Today</option>
                 <option value="this_week">This Week</option>
                 <option value="last_week">Last Week</option>
-                <option value="this_month">This Month</option>
+                <option value="this_month" selected>This Month</option>
                 <option value="last_month">Last Month</option>
                 <option value="this_year">This Year</option>
                 <option value="last_year">Last Year</option>
@@ -854,6 +898,7 @@ def dashboard():
         </div>
     </div>
 
+    <!-- CHARTS ROW 2 -->
     <div class="chart-row">
         <div class="card">
             <div class="card-header">📈 Customer Retention</div>
@@ -865,6 +910,7 @@ def dashboard():
         </div>
     </div>
 
+    <!-- CHARTS ROW 3 -->
     <div class="chart-row">
         <div class="card">
             <div class="card-header">📦 Package Utilization</div>
@@ -876,6 +922,7 @@ def dashboard():
         </div>
     </div>
 
+    <!-- CHARTS ROW 4 -->
     <div class="chart-row">
         <div class="card">
             <div class="card-header">📱 Sent SMS</div>
@@ -887,6 +934,7 @@ def dashboard():
         </div>
     </div>
 
+    <!-- CHARTS ROW 5 -->
     <div class="chart-row">
         <div class="card">
             <div class="card-header">📋 Registrations</div>
@@ -898,6 +946,7 @@ def dashboard():
         </div>
     </div>
 
+    <!-- PACKAGE PERFORMANCE TABLE -->
     <div class="card">
         <div class="card-header">🏆 Package Performance</div>
         <table>
@@ -906,6 +955,7 @@ def dashboard():
         </table>
     </div>
 
+    <!-- JAVASCRIPT TO LOAD CHARTS -->
     <script>
     async function loadPay() {{
         var p = document.getElementById('pp').value;
@@ -1103,9 +1153,11 @@ def dashboard():
         document.getElementById('maTable').innerHTML = rows;
     }});
 
+    // Initial load
     loadPay();
     </script>
     '''
+    
     return render_page("Dashboard", content, get_pending_count(pid), pid, admin=True)
 
 # ------------------------------------------------------------
