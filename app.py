@@ -685,12 +685,12 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False):
         layout = 'public-layout'
 
     return base_template.replace('{title}', title) \
-                        .replace('{layout_class}', layout) \
-                        .replace('{sidebar_html}', sidebar) \
-                        .replace('{topbar_html}', topbar) \
-                        .replace('{content}', content) \
-                        .replace('{support_phone}', sp)
-                        .replace('{theme_style}', theme_style)
+                    .replace('{layout_class}', layout) \
+                    .replace('{sidebar_html}', sidebar) \
+                    .replace('{topbar_html}', topbar) \
+                    .replace('{content}', content) \
+                    .replace('{support_phone}', sp) \
+                    .replace('{theme_style}', theme_style)
 
 # ------------------------------------------------------------
 # CUSTOMER ROUTES
