@@ -690,6 +690,7 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False):
                         .replace('{topbar_html}', topbar) \
                         .replace('{content}', content) \
                         .replace('{support_phone}', sp)
+                        .replace('{theme_style}', theme_style)
 
 # ------------------------------------------------------------
 # CUSTOMER ROUTES
@@ -701,66 +702,56 @@ def home():
     if not p:
         return "Provider not found.", 404
 
-    # ----- Get the selected theme -----
-    theme = get_setting(pid, 'captive_portal_theme', 'classic')
+    # Get the selected theme – default is 'default' (original design)
+    theme = get_setting(pid, 'captive_portal_theme', 'default')
 
-    # ----- Define theme CSS overrides (inline) -----
-    theme_css = {
-        'classic': '''
-            /* Classic – clean blue & white */
-            :root {
-                --primary: #1a73e8;
-                --primary-dark: #1557b0;
-                --bg: #f0f4f8;
-                --card-bg: rgba(255,255,255,0.85);
-                --text: #1a1a1a;
-                --text-secondary: #666666;
-                --border: #e0e0e0;
-                --shadow: 0 8px 32px rgba(0,0,0,0.08);
-            }
-            .hero h1 { background: linear-gradient(135deg, #1a73e8, #6366f1); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-            .btn { background: linear-gradient(135deg, #1a73e8, #6366f1); }
-        ''',
-        'modern': '''
-            /* Modern – dark & vibrant */
-            :root {
-                --primary: #f5af19;
-                --primary-dark: #d4940e;
-                --bg: #0f172a;
-                --card-bg: rgba(30,41,59,0.9);
-                --text: #f1f5f9;
-                --text-secondary: #94a3b8;
-                --border: #334155;
-                --shadow: 0 8px 32px rgba(0,0,0,0.5);
-            }
-            body { background: #0f172a; }
-            .hero { background: linear-gradient(135deg, rgba(245,175,25,0.2), rgba(26,115,232,0.1)) !important; }
-            .hero h1 { background: linear-gradient(135deg, #f5af19, #ff6b6b); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-            .btn { background: linear-gradient(135deg, #f5af19, #ff6b6b); }
-            .card { background: rgba(30,41,59,0.9); border: 1px solid rgba(255,255,255,0.08); }
+    # Define themes: 'default' applies no overrides (original CSS remains)
+    theme_styles = {
+        'default': '',  # No extra CSS – uses the base template styles
+        'neon': '''
+        /* NEON – vibrant, glowing */
+        :root {
+            --primary: #00d4ff;
+            --primary-dark: #0099cc;
+            --bg: #0a0a1a;
+            --card-bg: rgba(20, 20, 40, 0.85);
+            --text: #e0e0ff;
+            --text-secondary: #a0a0cc;
+            --border: rgba(0, 212, 255, 0.3);
+            --shadow: 0 8px 32px rgba(0, 212, 255, 0.2);
+        }
+        body { background: #0a0a1a; background-image: radial-gradient(circle at 20% 30%, rgba(0, 212, 255, 0.1) 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(255, 0, 150, 0.1) 0%, transparent 50%); }
+        .hero { background: rgba(0, 212, 255, 0.05) !important; border: 1px solid rgba(0, 212, 255, 0.2) !important; }
+        .hero h1 { background: linear-gradient(135deg, #00d4ff, #ff00a0); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+        .btn { background: linear-gradient(135deg, #00d4ff, #0099cc); box-shadow: 0 0 20px rgba(0, 212, 255, 0.4); }
+        .card { background: rgba(20, 20, 40, 0.85); border: 1px solid rgba(0, 212, 255, 0.2); }
+        .stat-card { background: rgba(20, 20, 40, 0.7); border: 1px solid rgba(0, 212, 255, 0.15); }
+        .voucher-code { background: linear-gradient(135deg, #00d4ff, #ff00a0); }
         ''',
         'minimalist': '''
-            /* Minimalist – light & minimal */
-            :root {
-                --primary: #2c3e50;
-                --primary-dark: #1a252f;
-                --bg: #ffffff;
-                --card-bg: rgba(255,255,255,0.95);
-                --text: #2c3e50;
-                --text-secondary: #7f8c8d;
-                --border: #ecf0f1;
-                --shadow: 0 2px 10px rgba(0,0,0,0.05);
-            }
-            body { background: #ffffff; }
-            .hero { background: #f8f9fa !important; border: none !important; }
-            .hero h1 { background: linear-gradient(135deg, #2c3e50, #3498db); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-            .btn { background: #2c3e50; box-shadow: none; }
-            .card { box-shadow: none; border: 1px solid #ecf0f1; }
+        /* MINIMALIST – light, clean */
+        :root {
+            --primary: #2c3e50;
+            --primary-dark: #1a252f;
+            --bg: #f8f9fa;
+            --card-bg: rgba(255,255,255,0.95);
+            --text: #2c3e50;
+            --text-secondary: #7f8c8d;
+            --border: #ecf0f1;
+            --shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        body { background: #f8f9fa; }
+        .hero { background: #ffffff !important; border: 1px solid #ecf0f1 !important; }
+        .hero h1 { background: linear-gradient(135deg, #2c3e50, #3498db); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+        .btn { background: #2c3e50; box-shadow: none; }
+        .card { background: #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,0.05); border: 1px solid #ecf0f1; }
+        .stat-card { background: #ffffff; border: 1px solid #ecf0f1; }
+        .voucher-code { background: #2c3e50; }
         '''
     }
 
-    # Build the <style> tag
-    style_tag = f'<style>{theme_css.get(theme, theme_css["classic"])}</style>'
+    # Get the CSS for the selected theme – fallback to '' for 'default'
+    theme_css = theme_styles.get(theme, '')
 
     # ----- Build the rest of the page (unchanged) -----
     bn = p['business_name'] if p else 'RockabyWiFi'
@@ -769,7 +760,6 @@ def home():
     hero_logo = '<img src="/static/ug-06.png" alt="RockabyWiFi" style="height:80px; width:80px; border-radius:16px; object-fit:cover; margin-bottom:15px; box-shadow:0 4px 15px rgba(0,0,0,0.2);">'
 
     content = f'''
-    {style_tag}  <!-- INJECT THEME CSS HERE -->
     <div class="card" style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">{logo}<h2 style="margin:0;">{bn}</h2></div>{poster}
     <div class="hero" style="background: linear-gradient(135deg, rgba(26,115,232,0.15), rgba(99,102,241,0.1)); border-radius:var(--radius); padding:40px; text-align:center; margin-bottom:30px; border:1px solid var(--glass-border);">
         {hero_logo}
@@ -781,7 +771,9 @@ def home():
     <p style="text-align:center;margin-top:15px;"><a href="/redeem?pid={pid}" class="btn btn-outline">Already have a voucher?</a> <a href="/subscriber-login?pid={pid}" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a></p>
     <p style="text-align:center;margin-top:10px;"><a href="/free-trial?pid={pid}" class="btn btn-outline" style="background: linear-gradient(135deg, #28a745, #51cf66); color:white; border:none;">🎁 Free 5-Minute Trial</a></p>
     '''
-    return render_page("Get Internet Access", content, get_pending_count(pid), pid, admin=False)
+
+    # Pass the theme CSS (empty for 'default') to render_page
+    return render_page("Get Internet Access", content, get_pending_count(pid), pid, admin=False, theme_style=theme_css)
 
 @app.route('/free-trial')
 def free_trial():
@@ -2685,12 +2677,12 @@ def settings():
         logo_preview = f'<p>Current logo: <img src="/static/uploads/{provider["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if provider and provider['logo_image'] else ''
 
         theme_options = f'''
-        <select name="captive_portal_theme" style="width:auto; min-width:200px;">
-            <option value="classic" {"selected" if current_theme == 'classic' else ""}>Classic – Clean & Professional</option>
-            <option value="modern" {"selected" if current_theme == 'modern' else ""}>Modern – Dark & Bold</option>
-            <option value="minimalist" {"selected" if current_theme == 'minimalist' else ""}>Minimalist – Light & Minimal</option>
-        </select>
-        '''
+<select name="captive_portal_theme" style="width:auto; min-width:200px;">
+    <option value="default" {"selected" if current_theme == 'default' else ""}>Default – Original Design</option>
+    <option value="neon" {"selected" if current_theme == 'neon' else ""}>Neon – Vibrant & Glowing</option>
+    <option value="minimalist" {"selected" if current_theme == 'minimalist' else ""}>Minimalist – Clean & Simple</option>
+</select>
+'''
 
         content = f'''
         <div class="card">
