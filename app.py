@@ -280,6 +280,11 @@ base_template = """
         .sidebar-menu a:hover, .sidebar-menu a.active {
             background:rgba(26,115,232,0.08); color:var(--primary); border-left-color: var(--primary);
         }
+        .sidebar-menu a:hover, .sidebar-menu a.active {
+    background: linear-gradient(90deg, rgba(245,175,25,0.2), transparent);
+    color: #f5af19;
+    border-left-color: #f5af19;
+}
         .sidebar-menu .badge {
             background: linear-gradient(135deg, var(--primary), #6366f1);
             color:#fff; padding:2px 10px; border-radius:12px; font-size:0.75rem; margin-left:auto;
@@ -567,7 +572,7 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False):
         eq_cnt = db.execute("SELECT COUNT(*) as c FROM equipment WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         exp_cnt = db.execute("SELECT COUNT(*) as c FROM expiry_dates WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         ip_cnt = db.execute("SELECT COUNT(*) as c FROM ip_bindings WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
-        sidebar = f"""<div class="sidebar" id="sidebar"><div class="sidebar-header"><img src="/static/icon-192.png"><h3>ROCKABYTECH</h3></div><div class="sidebar-menu">
+        sidebar = f"""<div class="sidebar" id="sidebar"><div class="sidebar-header" style="background: linear-gradient(135deg, #f5af19, #f5af19 40%, #1a73e8 100%);"><img src="/static/icon-192.png"><h3 style="color:#fff; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">ROCKABYTECH</h3></div>...
         <a href="/dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
         <a href="/active-users"><i class="fas fa-wifi"></i> Active Users <span class="badge">{active_cnt}</span></a>
         <a href="/users"><i class="fas fa-users"></i> Users <span class="badge">{users_cnt}</span></a>
@@ -1505,37 +1510,61 @@ def expiry_dates():
 @app.route('/expiry-dates/add', methods=['GET','POST'])
 @login_required
 def add_expiry_date():
+    pid = session['provider_id']
     if request.method == 'POST':
-        db = get_db(); db.execute("INSERT INTO expiry_dates (provider_id,user_id,expiry_date,grace_period) VALUES (?,?,?,?)",(session['provider_id'], int(request.form['user_id']), request.form['expiry_date'], int(request.form.get('grace',0)))); db.commit()
+        db = get_db()
+        db.execute("INSERT INTO expiry_dates (provider_id, user_id, expiry_date, grace_period) VALUES (?,?,?,?)",
+                   (pid, int(request.form['user_id']), request.form['expiry_date'], int(request.form.get('grace', 0))))
+        db.commit()
         return redirect('/expiry-dates')
-    db = get_db(); users = db.execute("SELECT id, username FROM subscribers WHERE provider_id=?",(session['provider_id'],)).fetchall()
+    db = get_db()
+    users = db.execute("SELECT id, username FROM subscribers WHERE provider_id=?", (pid,)).fetchall()
     user_opts = ''.join(f'<option value="{u["id"]}">{u["username"]}</option>' for u in users)
-    return render_page("Create Expiry Date",f'''<div class="card"><div class="card-header">Create Expiry Date</div>
-    <form method="POST"><label>User*</label><select name="user_id" required>{user_opts}</select>
-    <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
-        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Hour</button>
-        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(hours=12)).strftime('%Y-%m-%dT%H:%M')}'">+ 12 Hours</button>
-        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Day</button>
-        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=7)).strftime('%Y-%m-%dT%H:%M')}'">+ 7 Days</button>
-        <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=30)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Month</button>
+    return render_page("Create Expiry Date", f'''
+    <div class="card">
+        <div class="card-header">Create Expiry Date</div>
+        <form method="POST">
+            <label>User*</label><select name="user_id" required>{user_opts}</select>
+            <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Hour</button>
+                <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(hours=12)).strftime('%Y-%m-%dT%H:%M')}'">+ 12 Hours</button>
+                <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Day</button>
+                <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=7)).strftime('%Y-%m-%dT%H:%M')}'">+ 7 Days</button>
+                <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry_date]').value='{(datetime.now()+timedelta(days=30)).strftime('%Y-%m-%dT%H:%M')}'">+ 1 Month</button>
+            </div>
+            <label>Expiry Date*</label><input type="datetime-local" name="expiry_date" required>
+            <label>Grace Period (days)</label><input type="number" name="grace" value="0">
+            <button type="submit" class="btn" style="margin-top:20px;">Create</button>
+        </form>
     </div>
-    <label>Expiry Date*</label><input type="datetime-local" name="expiry_date" required>
-    <label>Grace Period (days)</label><input type="number" name="grace" value="0">
-    <button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+    ''', get_pending_count(pid), pid, admin=True)
 
 @app.route('/expiry-dates/edit/<int:eid>', methods=['GET','POST'])
 @login_required
 def edit_expiry_date(eid):
+    pid = session['provider_id']
     db = get_db()
-    if request.method == 'POST': db.execute("UPDATE expiry_dates SET expiry_date=?,grace_period=? WHERE id=? AND provider_id=?",(request.form['expiry_date'],int(request.form.get('grace',0)),eid,session['provider_id'])); db.commit(); return redirect('/expiry-dates')
-    e = db.execute("SELECT * FROM expiry_dates WHERE id=? AND provider_id=?",(eid,session['provider_id'])).fetchone()
-    if not e: return "Not found", 404
-    users = db.execute("SELECT id, username FROM subscribers WHERE provider_id=?",(session['provider_id'],)).fetchall()
+    if request.method == 'POST':
+        db.execute("UPDATE expiry_dates SET expiry_date=?, grace_period=? WHERE id=? AND provider_id=?",
+                   (request.form['expiry_date'], int(request.form.get('grace', 0)), eid, pid))
+        db.commit()
+        return redirect('/expiry-dates')
+    e = db.execute("SELECT * FROM expiry_dates WHERE id=? AND provider_id=?", (eid, pid)).fetchone()
+    if not e:
+        return "Not found", 404
+    users = db.execute("SELECT id, username FROM subscribers WHERE provider_id=?", (pid,)).fetchall()
     user_opts = ''.join(f'<option value="{u["id"]}" {"selected" if u["id"]==e["user_id"] else ""}>{u["username"]}</option>' for u in users)
-    return render_page("Edit Expiry Date",f'''<div class="card"><div class="card-header">Edit Expiry Date</div><form method="POST"><label>User</label><select name="user_id">{user_opts}</select>
-    <label>Expiry Date</label><input type="datetime-local" name="expiry_date" value="{e["expiry_date"]}" required>
-    <label>Grace Period (days)</label><input type="number" name="grace" value="{e["grace_period"]}">
-    <button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>''', get_pending_count(pid), pid, admin=True)
+    return render_page("Edit Expiry Date", f'''
+    <div class="card">
+        <div class="card-header">Edit Expiry Date</div>
+        <form method="POST">
+            <label>User</label><select name="user_id">{user_opts}</select>
+            <label>Expiry Date</label><input type="datetime-local" name="expiry_date" value="{e['expiry_date']}" required>
+            <label>Grace Period (days)</label><input type="number" name="grace" value="{e['grace_period']}">
+            <button type="submit" class="btn" style="margin-top:20px;">Update</button>
+        </form>
+    </div>
+    ''', get_pending_count(pid), pid, admin=True)
 
 @app.route('/expiry-dates/delete/<int:eid>')
 @login_required
@@ -1657,21 +1686,59 @@ def tickets():
 @app.route('/tickets/add', methods=['GET','POST'])
 @login_required
 def add_ticket():
-    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO tickets (provider_id,subject,description,priority,status) VALUES (?,?,?,?,?)",(session['provider_id'],request.form['subject'],request.form['description'],request.form['priority'],request.form['status'])); db.commit(); return redirect('/tickets')
-    return render_page("Raise Ticket",'''<div class="card"><div class="card-header">Raise Ticket</div>
-    <form method="POST"><label>Client*</label><input type="text" name="client" required><label>Subject*</label><input type="text" name="subject" required>
-    <label>Status</label><select name="status"><option value="open">Open</option><option value="closed">Closed</option></select>
-    <label>Priority</label><select name="priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
-    <label>Description*</label><textarea name="description" required></textarea><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+    pid = session['provider_id']
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO tickets (provider_id, subject, description, priority, status) VALUES (?,?,?,?,?)",
+                   (pid, request.form['subject'], request.form['description'], request.form['priority'], request.form['status']))
+        db.commit()
+        return redirect('/tickets')
+    return render_page("Raise Ticket", '''
+    <div class="card">
+        <div class="card-header">Raise Ticket</div>
+        <form method="POST">
+            <label>Client*</label><input type="text" name="client" required>
+            <label>Subject*</label><input type="text" name="subject" required>
+            <label>Status</label><select name="status"><option value="open">Open</option><option value="closed">Closed</option></select>
+            <label>Priority</label><select name="priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
+            <label>Description*</label><textarea name="description" required></textarea>
+            <button type="submit" class="btn" style="margin-top:20px;">Create</button>
+        </form>
+    </div>
+    ''', get_pending_count(pid), pid, admin=True)
 
 @app.route('/tickets/edit/<int:tid>', methods=['GET','POST'])
 @login_required
 def edit_ticket(tid):
+    pid = session['provider_id']
     db = get_db()
-    if request.method == 'POST': db.execute("UPDATE tickets SET subject=?,description=?,status=?,priority=? WHERE id=? AND provider_id=?",(request.form['subject'],request.form['description'],request.form['status'],request.form['priority'],tid,session['provider_id'])); db.commit(); return redirect('/tickets')
-    t = db.execute("SELECT * FROM tickets WHERE id=? AND provider_id=?",(tid,session['provider_id'])).fetchone()
-    if not t: return "Not found", 404
-    content = f'<div class="card"><div class="card-header">Edit Ticket</div><form method="POST"><label>Subject</label><input type="text" name="subject" value="{t["subject"]}" required><label>Status</label><select name="status"><option value="open" {"selected" if t["status"]=="open" else ""}>Open</option><option value="closed" {"selected" if t["status"]=="closed" else ""}>Closed</option></select><label>Priority</label><select name="priority"><option value="medium" {"selected" if t["priority"]=="medium" else ""}>Medium</option><option value="high" {"selected" if t["priority"]=="high" else ""}>High</option><option value="low" {"selected" if t["priority"]=="low" else ""}>Low</option></select><label>Description</label><textarea name="description">{t["description"] or ""}</textarea><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    if request.method == 'POST':
+        db.execute("UPDATE tickets SET subject=?, description=?, status=?, priority=? WHERE id=? AND provider_id=?",
+                   (request.form['subject'], request.form['description'], request.form['status'], request.form['priority'], tid, pid))
+        db.commit()
+        return redirect('/tickets')
+    t = db.execute("SELECT * FROM tickets WHERE id=? AND provider_id=?", (tid, pid)).fetchone()
+    if not t:
+        return "Not found", 404
+    content = f'''
+    <div class="card">
+        <div class="card-header">Edit Ticket</div>
+        <form method="POST">
+            <label>Subject</label><input type="text" name="subject" value="{t['subject']}" required>
+            <label>Status</label><select name="status">
+                <option value="open" {"selected" if t['status']=='open' else ""}>Open</option>
+                <option value="closed" {"selected" if t['status']=='closed' else ""}>Closed</option>
+            </select>
+            <label>Priority</label><select name="priority">
+                <option value="medium" {"selected" if t['priority']=='medium' else ""}>Medium</option>
+                <option value="high" {"selected" if t['priority']=='high' else ""}>High</option>
+                <option value="low" {"selected" if t['priority']=='low' else ""}>Low</option>
+            </select>
+            <label>Description</label><textarea name="description">{t['description'] or ''}</textarea>
+            <button type="submit" class="btn" style="margin-top:20px;">Update</button>
+        </form>
+    </div>
+    '''
     return render_page("Edit Ticket", content, get_pending_count(pid), pid, admin=True)
 
 @app.route('/tickets/delete/<int:tid>')
@@ -1693,18 +1760,51 @@ def leads():
 @app.route('/leads/add', methods=['GET','POST'])
 @login_required
 def add_lead():
-    if request.method == 'POST': db = get_db(); db.execute("INSERT INTO leads (provider_id,name,phone,email,source) VALUES (?,?,?,?,?)",(session['provider_id'],request.form['name'],request.form['phone'],request.form['email'],request.form['address'])); db.commit(); return redirect('/leads')
-    return render_page("Create Lead",'''<div class="card"><div class="card-header">Create a new lead</div>
-    <form method="POST"><label>Name*</label><input type="text" name="name" required><label>Email</label><input type="email" name="email"><label>Phone*</label><input type="tel" name="phone" required><label>Address*</label><input type="text" name="address" required><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+    pid = session['provider_id']
+    if request.method == 'POST':
+        db = get_db()
+        db.execute("INSERT INTO leads (provider_id, name, phone, email, source) VALUES (?,?,?,?,?)",
+                   (pid, request.form['name'], request.form['phone'], request.form['email'], request.form['address']))
+        db.commit()
+        return redirect('/leads')
+    return render_page("Create Lead", '''
+    <div class="card">
+        <div class="card-header">Create a new lead</div>
+        <form method="POST">
+            <label>Name*</label><input type="text" name="name" required>
+            <label>Email</label><input type="email" name="email">
+            <label>Phone*</label><input type="tel" name="phone" required>
+            <label>Address*</label><input type="text" name="address" required>
+            <button type="submit" class="btn" style="margin-top:20px;">Create</button>
+        </form>
+    </div>
+    ''', get_pending_count(pid), pid, admin=True)
 
 @app.route('/leads/edit/<int:lid>', methods=['GET','POST'])
 @login_required
 def edit_lead(lid):
+    pid = session['provider_id']
     db = get_db()
-    if request.method == 'POST': db.execute("UPDATE leads SET name=?,phone=?,email=?,source=? WHERE id=? AND provider_id=?",(request.form['name'],request.form['phone'],request.form['email'],request.form['address'],lid,session['provider_id'])); db.commit(); return redirect('/leads')
-    l = db.execute("SELECT * FROM leads WHERE id=? AND provider_id=?",(lid,session['provider_id'])).fetchone()
-    if not l: return "Not found", 404
-    content = f'<div class="card"><div class="card-header">Edit Lead</div><form method="POST"><label>Name*</label><input type="text" name="name" value="{l["name"]}" required><label>Email</label><input type="email" name="email" value="{l["email"] or ""}"><label>Phone*</label><input type="tel" name="phone" value="{l["phone"] or ""}" required><label>Address*</label><input type="text" name="address" value="{l["source"] or ""}" required><button type="submit" class="btn" style="margin-top:20px;">Update</button></form></div>'
+    if request.method == 'POST':
+        db.execute("UPDATE leads SET name=?, phone=?, email=?, source=? WHERE id=? AND provider_id=?",
+                   (request.form['name'], request.form['phone'], request.form['email'], request.form['address'], lid, pid))
+        db.commit()
+        return redirect('/leads')
+    l = db.execute("SELECT * FROM leads WHERE id=? AND provider_id=?", (lid, pid)).fetchone()
+    if not l:
+        return "Not found", 404
+    content = f'''
+    <div class="card">
+        <div class="card-header">Edit Lead</div>
+        <form method="POST">
+            <label>Name*</label><input type="text" name="name" value="{l['name']}" required>
+            <label>Email</label><input type="email" name="email" value="{l['email'] or ''}">
+            <label>Phone*</label><input type="tel" name="phone" value="{l['phone'] or ''}" required>
+            <label>Address*</label><input type="text" name="address" value="{l['source'] or ''}" required>
+            <button type="submit" class="btn" style="margin-top:20px;">Update</button>
+        </form>
+    </div>
+    '''
     return render_page("Edit Lead", content, get_pending_count(pid), pid, admin=True)
 
 @app.route('/leads/delete/<int:lid>')
