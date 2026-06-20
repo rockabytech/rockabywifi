@@ -689,10 +689,13 @@ def sms_verify():
         auto = prov['auto_approve'] if prov else 1; status = 'approved' if auto else 'pending'; vc = None
         rf = f"{parsed.get('recipient_name','')} {parsed.get('recipient_number','')}".strip()
         if status == 'approved':
-            vc = generate_voucher_code()
-            db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) VALUES (?,?,?,'sms',?)",(pid,vc,plan_id,phone))
-            db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status, voucher_code) VALUES (?,?,?,?,?,?,?,?,'approved',?)",(pid,phone,plan_id,raw,parsed['tid'],parsed['amount'],rf,parsed['date'],vc)); db.commit()
-            content = f'<div class="card"><div class="alert alert-success">Payment verified!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{vc}</div><button class="copy-btn" onclick="navigator.clipboard.writeText(\'{vc}\')">📋 Copy</button><p style="margin-top:10px;">Use this code on the <a href="/redeem?pid={pid}">Redeem page</a> to connect.</p><a href="/?pid={pid}" class="btn">Back to Home</a></div>'
+    vc = generate_voucher_code()
+    db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number, used, used_at) VALUES (?,?,?,'sms',?,1,CURRENT_TIMESTAMP)",
+               (pid, vc, plan_id, phone))
+    db.execute("INSERT INTO voucher_requests (...) VALUES (...,'approved',?)", (pid, phone, plan_id, raw, parsed['tid'], parsed['amount'], rf, parsed['date'], vc))
+    db.commit()
+    mt_add_user(phone, plan['duration_minutes'])
+    content = f'<div class="card"><div class="alert alert-success">Payment verified! You are now connected.</div><a href="/?pid={pid}" class="btn">Back to Home</a></div>'
         else:
             db.execute("INSERT INTO voucher_requests (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status) VALUES (?,?,?,?,?,?,?,?,'pending')",(pid,phone,plan_id,raw,parsed['tid'],parsed['amount'],rf,parsed['date'])); db.commit()
             content = '<div class="card"><div class="alert alert-success">Payment submitted! Waiting for approval.</div><p><a href="/?pid='+str(pid)+'" class="btn">Back to Home</a></p></div>'
@@ -1978,8 +1981,20 @@ def record_payment():
 @app.route('/approve/<int:rid>')
 @login_required
 def approve(rid):
-    pid = session['provider_id']; db = get_db(); r = db.execute("SELECT phone_number,plan_id FROM voucher_requests WHERE id=? AND provider_id=?",(rid,pid)).fetchone()
-    if r: code = generate_voucher_code(); db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number) VALUES (?,?,?,'sms',?)",(pid,code,r['plan_id'],r['phone_number'])); db.execute("UPDATE voucher_requests SET status='approved',voucher_code=? WHERE id=?",(code,rid)); db.commit()
+    pid = session['provider_id']
+    db = get_db()
+    r = db.execute("SELECT phone_number, plan_id FROM voucher_requests WHERE id=? AND provider_id=?", (rid, pid)).fetchone()
+    if r:
+        plan = db.execute("SELECT duration_minutes FROM plans WHERE id=?", (r['plan_id'],)).fetchone()
+        if plan:
+            code = generate_voucher_code()
+            # Insert voucher as used immediately
+            db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number, used, used_at) VALUES (?,?,?,'sms',?,1,CURRENT_TIMESTAMP)",
+                       (pid, code, r['plan_id'], r['phone_number']))
+            db.execute("UPDATE voucher_requests SET status='approved', voucher_code=? WHERE id=?", (code, rid))
+            db.commit()
+            # Add user to MikroTik now
+            mt_add_user(r['phone_number'], plan['duration_minutes'])
     return redirect('/payments')
 
 @app.route('/reject/<int:rid>')
