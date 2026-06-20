@@ -572,28 +572,28 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False):
         eq_cnt = db.execute("SELECT COUNT(*) as c FROM equipment WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         exp_cnt = db.execute("SELECT COUNT(*) as c FROM expiry_dates WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         ip_cnt = db.execute("SELECT COUNT(*) as c FROM ip_bindings WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
-        sidebar = f"""<div class="sidebar" id="sidebar"><div class="sidebar-header" style="background: linear-gradient(135deg, #f5af19, #f5af19 40%, #1a73e8 100%);"><img src="/static/icon-192.png"><h3 style="color:#fff; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">ROCKABYTECH</h3></div>...
-        <a href="/dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-        <a href="/active-users"><i class="fas fa-wifi"></i> Active Users <span class="badge">{active_cnt}</span></a>
-        <a href="/users"><i class="fas fa-users"></i> Users <span class="badge">{users_cnt}</span></a>
-        <a href="/expiry-dates" style="padding-left:30px;font-size:0.85rem;"><i class="far fa-clock"></i> Expiry Dates <span class="badge">{exp_cnt}</span></a>
-        <a href="/ip-bindings" style="padding-left:30px;font-size:0.85rem;"><i class="fas fa-link"></i> IP Bindings <span class="badge">{ip_cnt}</span></a>
-        <a href="/tickets"><i class="fas fa-ticket-alt"></i> Tickets <span class="badge">{tix_cnt}</span></a>
-        <a href="/leads"><i class="fas fa-chart-line"></i> Leads <span class="badge">{leads_cnt}</span></a>
-        <hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
-        <a href="/plans"><i class="fas fa-box"></i> Packages <span class="badge">{pkg_cnt}</span></a>
-        <a href="/payments"><i class="fas fa-money-bill-wave"></i> Payments</a>
-        <a href="/vouchers"><i class="fas fa-ticket-alt"></i> Vouchers <span class="badge">{vouch_cnt}</span></a>
-        <a href="/invoices"><i class="fas fa-file-invoice"></i> Invoices <span class="badge">{inv_cnt}</span></a>
-        <a href="/expenses"><i class="fas fa-receipt"></i> Expenses</a>
-        <hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
-        <a href="/messages"><i class="fas fa-envelope"></i> Messages</a>
-        <a href="/email"><i class="fas fa-at"></i> Emails</a>
-        <a href="/campaign"><i class="fas fa-bullhorn"></i> Campaigns <span class="badge">{camp_cnt}</span></a>
-        <hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
-        <a href="/mikrotik"><i class="fas fa-server"></i> MikroTik <span class="badge">{mt_cnt}</span></a>
-        <a href="/equipment"><i class="fas fa-tools"></i> Equipment <span class="badge">{eq_cnt}</span></a>
-        </div></div>"""
+        sidebar = f"""<div class="sidebar" id="sidebar"><div class="sidebar-header"><img src="/static/icon-192.png"><h3 style="font-size:1.3rem; font-weight:800; margin:0;"><span style="color:#1a73e8;">ROCKABY</span><span style="color:#f5af19;">TECH</span></h3></div><div class="sidebar-menu">
+<a href="/dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+<a href="/active-users"><i class="fas fa-wifi"></i> Active Users <span class="badge">{active_cnt}</span></a>
+<a href="/users"><i class="fas fa-users"></i> Users <span class="badge">{users_cnt}</span></a>
+<a href="/expiry-dates" style="padding-left:30px;font-size:0.85rem;"><i class="far fa-clock"></i> Expiry Dates <span class="badge">{exp_cnt}</span></a>
+<a href="/ip-bindings" style="padding-left:30px;font-size:0.85rem;"><i class="fas fa-link"></i> IP Bindings <span class="badge">{ip_cnt}</span></a>
+<a href="/tickets"><i class="fas fa-ticket-alt"></i> Tickets <span class="badge">{tix_cnt}</span></a>
+<a href="/leads"><i class="fas fa-chart-line"></i> Leads <span class="badge">{leads_cnt}</span></a>
+<hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
+<a href="/plans"><i class="fas fa-box"></i> Packages <span class="badge">{pkg_cnt}</span></a>
+<a href="/payments"><i class="fas fa-money-bill-wave"></i> Payments</a>
+<a href="/vouchers"><i class="fas fa-ticket-alt"></i> Vouchers <span class="badge">{vouch_cnt}</span></a>
+<a href="/invoices"><i class="fas fa-file-invoice"></i> Invoices <span class="badge">{inv_cnt}</span></a>
+<a href="/expenses"><i class="fas fa-receipt"></i> Expenses</a>
+<hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
+<a href="/messages"><i class="fas fa-envelope"></i> Messages</a>
+<a href="/email"><i class="fas fa-at"></i> Emails</a>
+<a href="/campaign"><i class="fas fa-bullhorn"></i> Campaigns <span class="badge">{camp_cnt}</span></a>
+<hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
+<a href="/mikrotik"><i class="fas fa-server"></i> MikroTik <span class="badge">{mt_cnt}</span></a>
+<a href="/equipment"><i class="fas fa-tools"></i> Equipment <span class="badge">{eq_cnt}</span></a>
+</div></div>"""
         topbar = f'<div class="topbar"><button class="hamburger" onclick="toggleSidebar()">&#9776;</button><div class="topbar-right"><button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">🌓</button><span>Welcome, {session["provider_name"]}</span><div class="settings-dropdown"><a href="#" style="color:var(--text);text-decoration:none;"><i class="fas fa-cog"></i></a><div class="settings-dropdown-content"><a href="/provider/edit"><i class="fas fa-sliders-h"></i> Settings</a><a href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a></div></div></div></div>'
         layout = 'admin-layout'
     else:
