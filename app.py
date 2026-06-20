@@ -236,6 +236,17 @@ def format_data(size_mb):
 
 # seed_sample_data() removed – no more fake data
 
+
+def get_setting(provider_id, key, default=None):
+    db = get_db()
+    row = db.execute("SELECT value FROM settings WHERE provider_id=? AND key=?", (provider_id, key)).fetchone()
+    return row['value'] if row else default
+
+def set_setting(provider_id, key, value):
+    db = get_db()
+    db.execute("INSERT OR REPLACE INTO settings (provider_id, key, value) VALUES (?,?,?)", (provider_id, key, value))
+    db.commit()
+
 def yo_charge(phone, amount, plan_name, provider):
     if not provider['yo_username'] or not provider['yo_password']: return None
     ref = f"ROCK-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(1000,9999)}"
@@ -590,6 +601,7 @@ base_template = """
 def render_page(title, content, pending_count=0, provider_id=1, admin=False):
     provider = get_provider(provider_id)
     sp = provider['support_phone'] if provider and provider['support_phone'] else '256751318876'
+    
     if admin and session.get('provider_id'):
         db = get_db()
         active_cnt = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=? AND used=0",(session['provider_id'],)).fetchone()['c']
@@ -604,49 +616,80 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False):
         eq_cnt = db.execute("SELECT COUNT(*) as c FROM equipment WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         exp_cnt = db.execute("SELECT COUNT(*) as c FROM expiry_dates WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
         ip_cnt = db.execute("SELECT COUNT(*) as c FROM ip_bindings WHERE provider_id=?",(session['provider_id'],)).fetchone()['c']
+        
         sidebar = f"""<div class="sidebar" id="sidebar"><div class="sidebar-header"><img src="/static/icon-192.png"><h3 style="font-size:1.3rem; font-weight:800; margin:0;"><span style="color:#1a73e8;">ROCKABY</span><span style="color:#f5af19;">TECH</span></h3></div><div class="sidebar-menu">
-        <a href="/dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-        <a href="/active-users"><i class="fas fa-wifi"></i> Active Users <span class="badge">{active_cnt}</span></a>
-        <a href="/users"><i class="fas fa-users"></i> Users <span class="badge">{users_cnt}</span></a>
-        <a href="/expiry-dates" style="padding-left:30px;font-size:0.85rem;"><i class="far fa-clock"></i> Expiry Dates <span class="badge">{exp_cnt}</span></a>
-        <a href="/ip-bindings" style="padding-left:30px;font-size:0.85rem;"><i class="fas fa-link"></i> IP Bindings <span class="badge">{ip_cnt}</span></a>
-        <a href="/tickets"><i class="fas fa-ticket-alt"></i> Tickets <span class="badge">{tix_cnt}</span></a>
-        <a href="/leads"><i class="fas fa-chart-line"></i> Leads <span class="badge">{leads_cnt}</span></a>
-        <hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
-        <a href="/plans"><i class="fas fa-box"></i> Packages <span class="badge">{pkg_cnt}</span></a>
-        <a href="/payments"><i class="fas fa-money-bill-wave"></i> Payments</a>
-        <a href="/vouchers"><i class="fas fa-ticket-alt"></i> Vouchers <span class="badge">{vouch_cnt}</span></a>
-        <a href="/invoices"><i class="fas fa-file-invoice"></i> Invoices <span class="badge">{inv_cnt}</span></a>
-        <a href="/expenses"><i class="fas fa-receipt"></i> Expenses</a>
-        <hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
-        <a href="/messages"><i class="fas fa-envelope"></i> Messages</a>
-        <a href="/email"><i class="fas fa-at"></i> Emails</a>
-        <a href="/campaign"><i class="fas fa-bullhorn"></i> Campaigns <span class="badge">{camp_cnt}</span></a>
-        <hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
-        <a href="/mikrotik"><i class="fas fa-server"></i> MikroTik <span class="badge">{mt_cnt}</span></a>
-        <a href="/equipment"><i class="fas fa-tools"></i> Equipment <span class="badge">{eq_cnt}</span></a>
-        </div></div>"""
-        topbar = f'<div class="topbar"><button class="hamburger" onclick="toggleSidebar()">&#9776;</button><div class="topbar-right"><button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">🌓</button><span style="color:#1a73e8; font-weight:600;">Welcome, {session["provider_name"]}</span><div class="settings-dropdown"><a href="#" style="color:var(--text);text-decoration:none;"><i class="fas fa-cog"></i></a><div class="settings-dropdown-content"><a href="/provider/edit"><i class="fas fa-sliders-h"></i> Settings</a><a href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a></div></div></div></div>'
+<a href="/dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+<a href="/active-users"><i class="fas fa-wifi"></i> Active Users <span class="badge">{active_cnt}</span></a>
+<a href="/users"><i class="fas fa-users"></i> Users <span class="badge">{users_cnt}</span></a>
+<a href="/expiry-dates" style="padding-left:30px;font-size:0.85rem;"><i class="far fa-clock"></i> Expiry Dates <span class="badge">{exp_cnt}</span></a>
+<a href="/ip-bindings" style="padding-left:30px;font-size:0.85rem;"><i class="fas fa-link"></i> IP Bindings <span class="badge">{ip_cnt}</span></a>
+<a href="/tickets"><i class="fas fa-ticket-alt"></i> Tickets <span class="badge">{tix_cnt}</span></a>
+<a href="/leads"><i class="fas fa-chart-line"></i> Leads <span class="badge">{leads_cnt}</span></a>
+<hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
+<a href="/plans"><i class="fas fa-box"></i> Packages <span class="badge">{pkg_cnt}</span></a>
+<a href="/payments"><i class="fas fa-money-bill-wave"></i> Payments</a>
+<a href="/vouchers"><i class="fas fa-ticket-alt"></i> Vouchers <span class="badge">{vouch_cnt}</span></a>
+<a href="/invoices"><i class="fas fa-file-invoice"></i> Invoices <span class="badge">{inv_cnt}</span></a>
+<a href="/expenses"><i class="fas fa-receipt"></i> Expenses</a>
+<hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
+<a href="/messages"><i class="fas fa-envelope"></i> Messages</a>
+<a href="/email"><i class="fas fa-at"></i> Emails</a>
+<a href="/campaign"><i class="fas fa-bullhorn"></i> Campaigns <span class="badge">{camp_cnt}</span></a>
+<hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
+<a href="/mikrotik"><i class="fas fa-server"></i> MikroTik <span class="badge">{mt_cnt}</span></a>
+<a href="/equipment"><i class="fas fa-tools"></i> Equipment <span class="badge">{eq_cnt}</span></a>
+</div></div>"""
+
+        # ========== NEW EXPANDED TOPBAR ==========
+        topbar = f'''
+<div class="topbar">
+    <button class="hamburger" onclick="toggleSidebar()">&#9776;</button>
+    <div class="topbar-right">
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">🌓</button>
+        <span style="color:#1a73e8; font-weight:600;">Welcome, {session["provider_name"]}</span>
+        <div class="settings-dropdown">
+            <a href="#" style="color:var(--text);text-decoration:none;font-size:1.3rem;"><i class="fas fa-cog"></i></a>
+            <div class="settings-dropdown-content">
+                <a href="/settings"><i class="fas fa-sliders-h"></i> Settings</a>
+                <a href="/billing"><i class="fas fa-file-invoice"></i> Billing & Subscription</a>
+                <a href="/system-users"><i class="fas fa-users-cog"></i> System Users</a>
+                <a href="/system-logs"><i class="fas fa-history"></i> System Logs</a>
+                <a href="/refer"><i class="fas fa-share-alt"></i> Refer a Friend</a>
+                <a href="/docs"><i class="fas fa-book"></i> Documentation</a>
+                <hr style="border-color:var(--border); margin:5px 0;">
+                <a href="/logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+            </div>
+        </div>
+    </div>
+</div>
+'''
         layout = 'admin-layout'
     else:
         sidebar = ''
+        # Public topbar (no admin)
         topbar = '''
-    <div class="topbar" style="background:var(--card-bg); backdrop-filter:blur(20px); border-bottom:1px solid var(--glass-border); padding:14px 24px; display:flex; align-items:center; justify-content:space-between;">
-        <div style="display:flex; align-items:center; gap:12px;">
-            <img src="/static/icon-192.png" alt="RockabyTech" style="height:35px; width:35px; border-radius:8px; object-fit:cover;">
-            <span style="font-size:1.2rem; font-weight:800;">
-                <span style="color:#1a73e8;">ROCKABY</span><span style="color:#f5af19;">TECH</span>
-            </span>
-            <span style="font-size:0.75rem; color:var(--text-secondary); margin-left:5px;">WiFi Billing</span>
-        </div>
-        <div style="display:flex; align-items:center; gap:15px;">
-            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">🌓</button>
-            <a href="/login" class="btn btn-small">Login</a>
-        </div>
+<div class="topbar" style="background:transparent;box-shadow:none;">
+    <div style="display:flex; align-items:center; gap:12px;">
+        <img src="/static/icon-192.png" alt="RockabyTech" style="height:35px; width:35px; border-radius:8px; object-fit:cover;">
+        <span style="font-size:1.2rem; font-weight:800;">
+            <span style="color:#1a73e8;">ROCKABY</span><span style="color:#f5af19;">TECH</span>
+        </span>
+        <span style="font-size:0.75rem; color:var(--text-secondary); margin-left:5px;">WiFi Billing</span>
     </div>
-    '''
+    <div style="display:flex; align-items:center; gap:15px;">
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">🌓</button>
+        <a href="/login" class="btn btn-small">Login</a>
+    </div>
+</div>
+'''
         layout = 'public-layout'
-    return base_template.replace('{title}',title).replace('{layout_class}',layout).replace('{sidebar_html}',sidebar).replace('{topbar_html}',topbar).replace('{content}',content).replace('{support_phone}',sp)
+
+    return base_template.replace('{title}', title) \
+                        .replace('{layout_class}', layout) \
+                        .replace('{sidebar_html}', sidebar) \
+                        .replace('{topbar_html}', topbar) \
+                        .replace('{content}', content) \
+                        .replace('{support_phone}', sp)
 
 # ------------------------------------------------------------
 # CUSTOMER ROUTES
@@ -2427,32 +2470,11 @@ def delete_equipment(eid): db = get_db(); db.execute("DELETE FROM equipment WHER
 # ------------------------------------------------------------
 # PROVIDER SETTINGS
 # ------------------------------------------------------------
-@app.route('/provider/edit', methods=['GET','POST'])
+@app.route('/provider/edit')
 @login_required
-def edit_provider():
-    prov = get_provider(session['provider_id'])
-    if request.method == 'POST':
-        pf = request.files.get('poster'); lf = request.files.get('logo')
-        pfn = prov['poster_image'] if prov else None; lfn = prov['logo_image'] if prov else None
-        if pf and pf.filename and allowed_file(pf.filename):
-            os.makedirs(os.path.join(os.getcwd(),'static','uploads'),exist_ok=True); pfn = secure_filename(pf.filename); pf.save(os.path.join(os.getcwd(),'static','uploads',pfn))
-        if lf and lf.filename and allowed_file(lf.filename):
-            os.makedirs(os.path.join(os.getcwd(),'static','uploads'),exist_ok=True); lfn = secure_filename(lf.filename); lf.save(os.path.join(os.getcwd(),'static','uploads',lfn))
-        db = get_db(); db.execute("UPDATE providers SET business_name=?,support_phone=?,poster_image=?,logo_image=?,yo_username=?,yo_password=?,yo_auto_pay=? WHERE id=?",(request.form['business_name'],request.form['support_phone'],pfn,lfn,request.form.get('yo_username',''),request.form.get('yo_password',''),int(request.form.get('yo_auto_pay',0)),session['provider_id']))
-        db.commit(); session['provider_name'] = request.form['business_name']; return redirect('/dashboard')
-    pd = f'<p>Current poster: <img src="/static/uploads/{prov["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if prov and prov['poster_image'] else ''
-    ld = f'<p>Current logo: <img src="/static/uploads/{prov["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if prov and prov['logo_image'] else ''
-    content = f'''<div class="card"><div class="card-header">Provider Settings</div><form method="POST" enctype="multipart/form-data">
-    <label>Business Name</label><input type="text" name="business_name" value="{prov["business_name"] if prov else ""}" required>
-    <label>Support WhatsApp</label><input type="text" name="support_phone" value="{prov["support_phone"] if prov else ""}">
-    <label>Yo! Payments Username</label><input type="text" name="yo_username" value="{prov["yo_username"] if prov else ''}">
-    <label>Yo! Payments Password</label><input type="password" name="yo_password" value="{prov["yo_password"] if prov else ''}">
-    <label>Enable Auto Payment (Yo! Payments)</label>
-    <select name="yo_auto_pay"><option value="1" {"selected" if prov and prov["yo_auto_pay"] else ""}>Yes</option><option value="0" {"selected" if not prov or not prov["yo_auto_pay"] else ""}>No</option></select>
-    <label>Portal Poster/Banner</label><input type="file" name="poster" accept="image/*">{pd}
-    <label>Business Logo</label><input type="file" name="logo" accept="image/*">{ld}
-    <button type="submit" class="btn" style="margin-top:20px;">Save Settings</button></form></div>'''
-    return render_page("Settings", content, get_pending_count(session['provider_id']), session['provider_id'], admin=True)
+def provider_edit_redirect():
+    # Redirect to the new unified settings page, defaulting to the "General" tab
+    return redirect(url_for('settings', tab='general'))
 
 @app.route('/toggle-auto')
 @login_required
@@ -2474,6 +2496,255 @@ def stats():
     <div class="platform-revenue"><strong>RockabyTech Platform Fee (5% this week):</strong> UGX {wf:,} &nbsp; <small>({ws.strftime('%d %b')} - {we.strftime('%d %b')})</small></div>
     <div class="card"><div class="card-header">Top Selling Plans</div><table><tr><th>Plan</th><th>Sold</th></tr>{''.join(f'<tr><td>{p["name"]}</td><td>{p["c"]}</td></tr>' for p in pstats) or '<tr><td colspan="2">No sales yet.</td></tr>'}</table></div><a href="/dashboard" class="btn btn-outline">Back to Dashboard</a>"""
     return render_page("Statistics", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    pid = session['provider_id']
+    db = get_db()
+    provider = get_provider(pid)
+    tab = request.args.get('tab', 'general')
+
+    # Handle POST for each tab
+    if request.method == 'POST':
+        tab = request.form.get('tab', 'general')
+        if tab == 'general':
+            business_name = request.form['business_name']
+            support_phone = request.form.get('support_phone', '')
+            poster = request.files.get('poster')
+            logo = request.files.get('logo')
+            poster_filename = provider['poster_image'] if provider else None
+            logo_filename = provider['logo_image'] if provider else None
+            if poster and poster.filename and allowed_file(poster.filename):
+                poster_filename = secure_filename(poster.filename)
+                poster.save(os.path.join(app.config['UPLOAD_FOLDER'], poster_filename))
+            if logo and logo.filename and allowed_file(logo.filename):
+                logo_filename = secure_filename(logo.filename)
+                logo.save(os.path.join(app.config['UPLOAD_FOLDER'], logo_filename))
+            db.execute("UPDATE providers SET business_name=?, support_phone=?, poster_image=?, logo_image=? WHERE id=?",
+                       (business_name, support_phone, poster_filename, logo_filename, pid))
+            db.commit()
+            session['provider_name'] = business_name
+
+        elif tab == 'payments':
+            mtn = request.form.get('mtn_number', '')
+            airtel = request.form.get('airtel_number', '')
+            yo_user = request.form.get('yo_username', '')
+            yo_pass = request.form.get('yo_password', '')
+            yo_auto = 1 if request.form.get('yo_auto_pay') else 0
+            db.execute("UPDATE providers SET mtn_number=?, airtel_number=?, yo_username=?, yo_password=?, yo_auto_pay=? WHERE id=?",
+                       (mtn, airtel, yo_user, yo_pass, yo_auto, pid))
+            db.commit()
+
+        elif tab == 'pppoe':
+            set_setting(pid, 'pppoe_radius_server', request.form.get('radius_server', ''))
+            set_setting(pid, 'pppoe_nas_ip', request.form.get('nas_ip', ''))
+            set_setting(pid, 'pppoe_secret', request.form.get('secret', ''))
+
+        elif tab == 'hotspot':
+            set_setting(pid, 'hotspot_session_timeout', request.form.get('session_timeout', '3600'))
+            set_setting(pid, 'hotspot_idle_timeout', request.form.get('idle_timeout', '300'))
+
+        elif tab == 'sms':
+            set_setting(pid, 'sms_gateway', request.form.get('gateway', ''))
+            set_setting(pid, 'sms_api_key', request.form.get('api_key', ''))
+
+        elif tab == 'whatsapp':
+            set_setting(pid, 'whatsapp_phone_number_id', request.form.get('phone_number_id', ''))
+            set_setting(pid, 'whatsapp_access_token', request.form.get('access_token', ''))
+
+        elif tab == 'notifications':
+            set_setting(pid, 'notify_email', request.form.get('notify_email', ''))
+            set_setting(pid, 'notify_sms', request.form.get('notify_sms', ''))
+
+        return redirect(url_for('settings', tab=tab))
+
+    # GET – build the settings page
+    # Gather data for each tab
+    general_data = provider
+    payment_data = provider
+    pppoe_data = {
+        'radius_server': get_setting(pid, 'pppoe_radius_server', ''),
+        'nas_ip': get_setting(pid, 'pppoe_nas_ip', ''),
+        'secret': get_setting(pid, 'pppoe_secret', ''),
+    }
+    hotspot_data = {
+        'session_timeout': get_setting(pid, 'hotspot_session_timeout', '3600'),
+        'idle_timeout': get_setting(pid, 'hotspot_idle_timeout', '300'),
+    }
+    sms_data = {
+        'gateway': get_setting(pid, 'sms_gateway', ''),
+        'api_key': get_setting(pid, 'sms_api_key', ''),
+    }
+    whatsapp_data = {
+        'phone_number_id': get_setting(pid, 'whatsapp_phone_number_id', ''),
+        'access_token': get_setting(pid, 'whatsapp_access_token', ''),
+    }
+    notifications_data = {
+        'notify_email': get_setting(pid, 'notify_email', ''),
+        'notify_sms': get_setting(pid, 'notify_sms', ''),
+    }
+
+    # Build tab navigation
+    tabs = [
+        ('general', 'General'),
+        ('payments', 'Payments'),
+        ('pppoe', 'PPPoE'),
+        ('hotspot', 'Hotspot'),
+        ('sms', 'SMS'),
+        ('whatsapp', 'WhatsApp'),
+        ('notifications', 'Notifications'),
+    ]
+    nav = ''.join(f'<a href="/settings?tab={t[0]}" class="tab {"active" if tab==t[0] else ""}">{t[1]}</a>' for t in tabs)
+
+    # Build content per tab
+    if tab == 'general':
+        poster_preview = f'<p>Current poster: <img src="/static/uploads/{provider["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if provider and provider['poster_image'] else ''
+        logo_preview = f'<p>Current logo: <img src="/static/uploads/{provider["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if provider and provider['logo_image'] else ''
+        content = f'''
+        <div class="card">
+            <div class="card-header">General Settings</div>
+            <form method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="tab" value="general">
+                <label>Business Name</label>
+                <input type="text" name="business_name" value="{provider["business_name"] if provider else ""}" required>
+                <label>Support WhatsApp</label>
+                <input type="text" name="support_phone" value="{provider["support_phone"] if provider else ""}">
+                <label>Portal Poster/Banner</label>
+                <input type="file" name="poster" accept="image/*">
+                {poster_preview}
+                <label>Business Logo</label>
+                <input type="file" name="logo" accept="image/*">
+                {logo_preview}
+                <button type="submit" class="btn" style="margin-top:20px;">Save General Settings</button>
+            </form>
+        </div>
+        '''
+    elif tab == 'payments':
+        content = f'''
+        <div class="card">
+            <div class="card-header">Payment Settings</div>
+            <form method="POST">
+                <input type="hidden" name="tab" value="payments">
+                <label>MTN Mobile Money Number</label>
+                <input type="text" name="mtn_number" value="{provider["mtn_number"] if provider else ''}">
+                <label>Airtel Money Number</label>
+                <input type="text" name="airtel_number" value="{provider["airtel_number"] if provider else ''}">
+                <hr>
+                <label>Yo! Payments Username</label>
+                <input type="text" name="yo_username" value="{provider["yo_username"] if provider else ''}">
+                <label>Yo! Payments Password</label>
+                <input type="password" name="yo_password" value="{provider["yo_password"] if provider else ''}">
+                <label><input type="checkbox" name="yo_auto_pay" {"checked" if provider and provider["yo_auto_pay"] else ""}> Enable Yo! Auto‑Pay</label>
+                <button type="submit" class="btn" style="margin-top:20px;">Save Payment Settings</button>
+            </form>
+        </div>
+        '''
+    elif tab == 'pppoe':
+        content = f'''
+        <div class="card">
+            <div class="card-header">PPPoE Settings</div>
+            <form method="POST">
+                <input type="hidden" name="tab" value="pppoe">
+                <label>RADIUS Server</label>
+                <input type="text" name="radius_server" value="{pppoe_data['radius_server']}">
+                <label>NAS IP Address</label>
+                <input type="text" name="nas_ip" value="{pppoe_data['nas_ip']}">
+                <label>RADIUS Secret</label>
+                <input type="password" name="secret" value="{pppoe_data['secret']}">
+                <button type="submit" class="btn" style="margin-top:20px;">Save PPPoE Settings</button>
+            </form>
+        </div>
+        '''
+    elif tab == 'hotspot':
+        content = f'''
+        <div class="card">
+            <div class="card-header">Hotspot Settings</div>
+            <form method="POST">
+                <input type="hidden" name="tab" value="hotspot">
+                <label>Session Timeout (seconds)</label>
+                <input type="number" name="session_timeout" value="{hotspot_data['session_timeout']}">
+                <label>Idle Timeout (seconds)</label>
+                <input type="number" name="idle_timeout" value="{hotspot_data['idle_timeout']}">
+                <button type="submit" class="btn" style="margin-top:20px;">Save Hotspot Settings</button>
+            </form>
+        </div>
+        '''
+    elif tab == 'sms':
+        content = f'''
+        <div class="card">
+            <div class="card-header">SMS Gateway Settings</div>
+            <form method="POST">
+                <input type="hidden" name="tab" value="sms">
+                <label>Gateway (e.g., Twilio, AfricasTalking)</label>
+                <input type="text" name="gateway" value="{sms_data['gateway']}">
+                <label>API Key / Token</label>
+                <input type="password" name="api_key" value="{sms_data['api_key']}">
+                <button type="submit" class="btn" style="margin-top:20px;">Save SMS Settings</button>
+            </form>
+        </div>
+        '''
+    elif tab == 'whatsapp':
+        content = f'''
+        <div class="card">
+            <div class="card-header">WhatsApp Business API</div>
+            <form method="POST">
+                <input type="hidden" name="tab" value="whatsapp">
+                <label>Phone Number ID</label>
+                <input type="text" name="phone_number_id" value="{whatsapp_data['phone_number_id']}">
+                <label>Access Token</label>
+                <input type="password" name="access_token" value="{whatsapp_data['access_token']}">
+                <button type="submit" class="btn" style="margin-top:20px;">Save WhatsApp Settings</button>
+            </form>
+        </div>
+        '''
+    elif tab == 'notifications':
+        content = f'''
+        <div class="card">
+            <div class="card-header">Notification Preferences</div>
+            <form method="POST">
+                <input type="hidden" name="tab" value="notifications">
+                <label>Email for notifications</label>
+                <input type="email" name="notify_email" value="{notifications_data['notify_email']}">
+                <label>SMS for notifications (phone)</label>
+                <input type="text" name="notify_sms" value="{notifications_data['notify_sms']}">
+                <button type="submit" class="btn" style="margin-top:20px;">Save Notification Settings</button>
+            </form>
+        </div>
+        '''
+    else:
+        content = '<div class="card"><p>Select a tab to configure settings.</p></div>'
+
+    full_content = f'''
+    <div class="tabs" style="margin-bottom:20px;">{nav}</div>
+    {content}
+    '''
+    return render_page("Settings", full_content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/billing')
+@login_required
+def billing():
+    return render_page("Billing & Subscription", '<div class="card"><p>Billing details and subscription management coming soon.</p></div>', get_pending_count(session['provider_id']), session['provider_id'], admin=True)
+
+@app.route('/system-users')
+@login_required
+def system_users():
+    return render_page("System Users", '<div class="card"><p>Manage admin users and permissions (coming soon).</p></div>', get_pending_count(session['provider_id']), session['provider_id'], admin=True)
+
+@app.route('/system-logs')
+@login_required
+def system_logs():
+    return render_page("System Logs", '<div class="card"><p>Audit logs and activity history will appear here.</p></div>', get_pending_count(session['provider_id']), session['provider_id'], admin=True)
+
+@app.route('/refer')
+@login_required
+def refer():
+    return render_page("Refer a Friend", '<div class="card"><p>Your referral link: <code>https://rockabywifi.com/?ref=...</code></p></div>', get_pending_count(session['provider_id']), session['provider_id'], admin=True)
+
+@app.route('/docs')
+@login_required
+def docs():
+    return render_page("Documentation", '<div class="card"><p>Documentation and help resources will be linked here.</p></div>', get_pending_count(session['provider_id']), session['provider_id'], admin=True)
 
 # ------------------------------------------------------------
 # SUPER ADMIN
