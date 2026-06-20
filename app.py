@@ -763,7 +763,7 @@ def logout(): session.clear(); return redirect('/')
 def dashboard():
     pid = session['provider_id']
     db = get_db()
-    # seed_sample_data() removed – no more fake data
+    # seed_sample_data() removed
 
     today = date.today()
     ms = today.replace(day=1).isoformat()
@@ -890,35 +890,35 @@ def dashboard():
     </div>
 
     <script>
-    async function loadPay() {
+    async function loadPay() {{
         var p = document.getElementById('pp').value;
         var r = await fetch('/api/payments?period=' + p);
         var d = await r.json();
         var ctx = document.getElementById('payChart').getContext('2d');
         if (window.pc) window.pc.destroy();
-        window.pc = new Chart(ctx, {
+        window.pc = new Chart(ctx, {{
             type: 'bar',
-            data: {
+            data: {{
                 labels: d.labels,
-                datasets: [{
+                datasets: [{{
                     label: 'Payments (UGX)',
                     data: d.values,
                     backgroundColor: 'rgba(26,115,232,0.7)',
                     borderColor: '#1a73e8',
                     borderWidth: 2,
                     borderRadius: 8
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
-    }
+                }}]
+            }},
+            options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ display: false }} }} }}
+        }});
+    }}
 
-    fetch('/api/active-users-chart').then(r => r.json()).then(d => {
-        new Chart(document.getElementById('auChart').getContext('2d'), {
+    fetch('/api/active-users-chart').then(r => r.json()).then(d => {{
+        new Chart(document.getElementById('auChart').getContext('2d'), {{
             type: 'line',
-            data: {
+            data: {{
                 labels: d.labels,
-                datasets: [{
+                datasets: [{{
                     label: 'Active',
                     data: d.values,
                     borderColor: '#1a73e8',
@@ -927,143 +927,143 @@ def dashboard():
                     tension: 0.4,
                     pointRadius: 6,
                     pointBackgroundColor: '#1a73e8'
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
-    });
+                }}]
+            }},
+            options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ display: false }} }} }}
+        }});
+    }});
 
-    fetch('/api/retention').then(r => r.json()).then(d => {
-        new Chart(document.getElementById('retChart').getContext('2d'), {
+    fetch('/api/retention').then(r => r.json()).then(d => {{
+        new Chart(document.getElementById('retChart').getContext('2d'), {{
             type: 'bar',
-            data: {
+            data: {{
                 labels: d.labels,
                 datasets: [
-                    { label: 'New', data: d.new_cust, backgroundColor: 'rgba(26,115,232,0.7)', borderRadius: 6 },
-                    { label: 'Returning', data: d.returning, backgroundColor: 'rgba(81,207,102,0.7)', borderRadius: 6 },
-                    { label: 'Churned', data: d.churned, backgroundColor: 'rgba(255,107,107,0.7)', borderRadius: 6 }
+                    {{ label: 'New', data: d.new_cust, backgroundColor: 'rgba(26,115,232,0.7)', borderRadius: 6 }},
+                    {{ label: 'Returning', data: d.returning, backgroundColor: 'rgba(81,207,102,0.7)', borderRadius: 6 }},
+                    {{ label: 'Churned', data: d.churned, backgroundColor: 'rgba(255,107,107,0.7)', borderRadius: 6 }}
                 ]
-            },
-            options: {
+            }},
+            options: {{
                 responsive: true,
                 maintainAspectRatio: false,
-                scales: { x: { stacked: true }, y: { stacked: true } }
-            }
-        });
-    });
+                scales: {{ x: {{ stacked: true }}, y: {{ stacked: true }} }}
+            }}
+        }});
+    }});
 
-    fetch('/api/data-usage').then(r => r.json()).then(d => {
-        new Chart(document.getElementById('duChart').getContext('2d'), {
+    fetch('/api/data-usage').then(r => r.json()).then(d => {{
+        new Chart(document.getElementById('duChart').getContext('2d'), {{
             type: 'line',
-            data: {
+            data: {{
                 labels: d.labels,
                 datasets: [
-                    { label: 'Download', data: d.downloads, borderColor: '#1a73e8', backgroundColor: 'rgba(26,115,232,0.1)', fill: true, tension: 0.4 },
-                    { label: 'Upload', data: d.uploads, borderColor: '#ffd43b', backgroundColor: 'rgba(255,212,59,0.1)', fill: true, tension: 0.4 }
+                    {{ label: 'Download', data: d.downloads, borderColor: '#1a73e8', backgroundColor: 'rgba(26,115,232,0.1)', fill: true, tension: 0.4 }},
+                    {{ label: 'Upload', data: d.uploads, borderColor: '#ffd43b', backgroundColor: 'rgba(255,212,59,0.1)', fill: true, tension: 0.4 }}
                 ]
-            },
-            options: {
+            }},
+            options: {{
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: function(c) {
+                plugins: {{
+                    tooltip: {{
+                        callbacks: {{
+                            label: function(c) {{
                                 return c.dataset.label + ': ' + (c.raw >= 1000 ? (c.raw/1000).toFixed(2) + ' GB' : c.raw.toFixed(2) + ' MB');
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    });
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+        }});
+    }});
 
-    fetch('/api/package-util').then(r => r.json()).then(d => {
-        new Chart(document.getElementById('pkgChart').getContext('2d'), {
+    fetch('/api/package-util').then(r => r.json()).then(d => {{
+        new Chart(document.getElementById('pkgChart').getContext('2d'), {{
             type: 'doughnut',
-            data: {
+            data: {{
                 labels: d.labels,
-                datasets: [{
+                datasets: [{{
                     data: d.values,
                     backgroundColor: ['#1a73e8', '#51cf66', '#ffd43b', '#ff6b6b', '#6366f1', '#fd7e14'],
                     borderWidth: 0,
                     borderRadius: 4
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
-        });
-    });
+                }}]
+            }},
+            options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ position: 'bottom' }} }} }}
+        }});
+    }});
 
-    fetch('/api/forecast').then(r => r.json()).then(d => {
-        new Chart(document.getElementById('fcChart').getContext('2d'), {
+    fetch('/api/forecast').then(r => r.json()).then(d => {{
+        new Chart(document.getElementById('fcChart').getContext('2d'), {{
             type: 'line',
-            data: {
+            data: {{
                 labels: d.labels,
                 datasets: [
-                    { label: 'Historical', data: d.historical, borderColor: '#1a73e8', fill: false, tension: 0.4 },
-                    { label: 'Forecast', data: d.forecast, borderColor: '#51cf66', borderDash: [6, 3], fill: false, tension: 0.4 },
-                    { label: 'Upper', data: d.upper, borderColor: 'rgba(255,107,107,0.3)', borderDash: [2, 2], fill: false, pointRadius: 0 },
-                    { label: 'Lower', data: d.lower, borderColor: 'rgba(255,107,107,0.3)', borderDash: [2, 2], fill: false, pointRadius: 0 }
+                    {{ label: 'Historical', data: d.historical, borderColor: '#1a73e8', fill: false, tension: 0.4 }},
+                    {{ label: 'Forecast', data: d.forecast, borderColor: '#51cf66', borderDash: [6, 3], fill: false, tension: 0.4 }},
+                    {{ label: 'Upper', data: d.upper, borderColor: 'rgba(255,107,107,0.3)', borderDash: [2, 2], fill: false, pointRadius: 0 }},
+                    {{ label: 'Lower', data: d.lower, borderColor: 'rgba(255,107,107,0.3)', borderDash: [2, 2], fill: false, pointRadius: 0 }}
                 ]
-            },
-            options: {
+            }},
+            options: {{
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom' } }
-            }
-        });
-    });
+                plugins: {{ legend: {{ position: 'bottom' }} }}
+            }}
+        }});
+    }});
 
-    fetch('/api/sms-stats').then(r => r.json()).then(d => {
-        new Chart(document.getElementById('smsChart').getContext('2d'), {
+    fetch('/api/sms-stats').then(r => r.json()).then(d => {{
+        new Chart(document.getElementById('smsChart').getContext('2d'), {{
             type: 'bar',
-            data: {
+            data: {{
                 labels: d.labels,
-                datasets: [{
+                datasets: [{{
                     label: 'SMS',
                     data: d.values,
                     backgroundColor: 'rgba(99,102,241,0.7)',
                     borderColor: '#6366f1',
                     borderWidth: 2,
                     borderRadius: 6
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
-    });
+                }}]
+            }},
+            options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ display: false }} }} }}
+        }});
+    }});
 
-    fetch('/api/network').then(r => r.json()).then(d => {
-        new Chart(document.getElementById('netChart').getContext('2d'), {
+    fetch('/api/network').then(r => r.json()).then(d => {{
+        new Chart(document.getElementById('netChart').getContext('2d'), {{
             type: 'bar',
-            data: {
+            data: {{
                 labels: d.labels,
                 datasets: [
-                    { label: 'Download', data: d.downloads, backgroundColor: 'rgba(26,115,232,0.7)', borderRadius: 6 },
-                    { label: 'Upload', data: d.uploads, backgroundColor: 'rgba(255,212,59,0.7)', borderRadius: 6 }
+                    {{ label: 'Download', data: d.downloads, backgroundColor: 'rgba(26,115,232,0.7)', borderRadius: 6 }},
+                    {{ label: 'Upload', data: d.uploads, backgroundColor: 'rgba(255,212,59,0.7)', borderRadius: 6 }}
                 ]
-            },
-            options: {
+            }},
+            options: {{
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: function(c) {
+                plugins: {{
+                    tooltip: {{
+                        callbacks: {{
+                            label: function(c) {{
                                 return c.dataset.label + ': ' + (c.raw >= 1000 ? (c.raw/1000).toFixed(2) + ' GB' : c.raw.toFixed(2) + ' MB');
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    });
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+        }});
+    }});
 
-    fetch('/api/registration').then(r => r.json()).then(d => {
-        new Chart(document.getElementById('regChart').getContext('2d'), {
+    fetch('/api/registration').then(r => r.json()).then(d => {{
+        new Chart(document.getElementById('regChart').getContext('2d'), {{
             type: 'line',
-            data: {
+            data: {{
                 labels: d.labels,
-                datasets: [{
+                datasets: [{{
                     label: 'Registrations',
                     data: d.values,
                     borderColor: '#ff6b6b',
@@ -1072,19 +1072,19 @@ def dashboard():
                     tension: 0.4,
                     pointRadius: 6,
                     pointBackgroundColor: '#ff6b6b'
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
-    });
+                }}]
+            }},
+            options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ display: false }} }} }}
+        }});
+    }});
 
-    fetch('/api/most-active').then(r => r.json()).then(d => {
+    fetch('/api/most-active').then(r => r.json()).then(d => {{
         var rows = '';
-        d.forEach(u => {
-            rows += `<tr><td>${u.username}</td><td>${u.data_usage}</td><td>${u.phone}</td></tr>`;
-        });
+        d.forEach(u => {{
+            rows += `<tr><td>${{u.username}}</td><td>${{u.data_usage}}</td><td>${{u.phone}}</td></tr>`;
+        }});
         document.getElementById('maTable').innerHTML = rows;
-    });
+    }});
 
     loadPay();
     </script>
