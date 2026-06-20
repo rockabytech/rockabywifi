@@ -707,14 +707,13 @@ def home():
     if not p:
         return "Provider not found.", 404
 
-    # Get the selected theme – default is 'default' (original design)
+    # Get the selected theme
     theme = get_setting(pid, 'captive_portal_theme', 'default')
 
-    # Define themes: 'default' applies no overrides (original CSS remains)
+    # Theme styles (same as before)
     theme_styles = {
-        'default': '',  # No extra CSS – uses the base template styles
+        'default': '',
         'neon': '''
-        /* NEON – vibrant, glowing */
         :root {
             --primary: #00d4ff;
             --primary-dark: #0099cc;
@@ -734,7 +733,6 @@ def home():
         .voucher-code { background: linear-gradient(135deg, #00d4ff, #ff00a0); }
         ''',
         'minimalist': '''
-        /* MINIMALIST – light, clean */
         :root {
             --primary: #2c3e50;
             --primary-dark: #1a252f;
@@ -755,29 +753,86 @@ def home():
         '''
     }
 
-    # Get the CSS for the selected theme – fallback to '' for 'default'
     theme_css = theme_styles.get(theme, '')
 
-    # ----- Build the rest of the page (unchanged) -----
+    # ----- Build the page -----
     bn = p['business_name'] if p else 'RockabyWiFi'
     logo = f'<img src="/static/uploads/{p["logo_image"]}" class="provider-logo" alt="{bn}">' if p and p['logo_image'] else ''
     poster = f'<img src="/static/uploads/{p["poster_image"]}" class="provider-poster" alt="Poster">' if p and p['poster_image'] else ''
     hero_logo = '<img src="/static/ug-06.png" alt="RockabyWiFi" style="height:80px; width:80px; border-radius:16px; object-fit:cover; margin-bottom:15px; box-shadow:0 4px 15px rgba(0,0,0,0.2);">'
 
+    # ----- Fetch active public packages -----
+    db = get_db()
+    plans = db.execute(
+        "SELECT id, name, duration_minutes, price_ugx, speed_down, speed_up "
+        "FROM plans WHERE provider_id = ? AND is_active = 1 AND is_public = 1 "
+        "ORDER BY price_ugx ASC",
+        (pid,)
+    ).fetchall()
+
+    # ----- Build package cards -----
+    package_cards = ''
+    if plans:
+        for plan in plans:
+            speed = f"{plan['speed_down']}/{plan['speed_up']}" if plan['speed_down'] and plan['speed_up'] else 'Standard'
+            package_cards += f'''
+            <div class="card package-card" style="text-align:center; display:flex; flex-direction:column; justify-content:space-between;">
+                <div>
+                    <h3 style="margin-bottom:10px;">{plan['name']}</h3>
+                    <p style="font-size:0.9rem; color:var(--text-secondary);">⏱ {plan['duration_minutes']} minutes</p>
+                    <p style="font-size:1.1rem; font-weight:600; color:var(--primary);">UGX {plan['price_ugx']:,}</p>
+                    <p style="font-size:0.8rem; color:var(--text-secondary);">Speed: {speed}</p>
+                </div>
+                <a href="/sms-verify?pid={pid}&plan_id={plan['id']}" class="btn" style="margin-top:15px; width:100%;">Buy Now</a>
+            </div>
+            '''
+    else:
+        package_cards = '<p style="grid-column:1/-1; text-align:center;">No packages available at the moment.</p>'
+
+    # ----- Assemble content -----
     content = f'''
-    <div class="card" style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">{logo}<h2 style="margin:0;">{bn}</h2></div>{poster}
+    <!-- Brand & Poster -->
+    <div class="card" style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">{logo}<h2 style="margin:0;">{bn}</h2></div>
+    {poster}
+
+    <!-- Hero -->
     <div class="hero" style="background: linear-gradient(135deg, rgba(26,115,232,0.15), rgba(99,102,241,0.1)); border-radius:var(--radius); padding:40px; text-align:center; margin-bottom:30px; border:1px solid var(--glass-border);">
         {hero_logo}
         <h1 style="font-size:2.5rem; margin-bottom:15px; background:linear-gradient(135deg, var(--primary), #6366f1); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Fast & Reliable WiFi</h1>
-        <p style="font-size:1.1rem; color:var(--text-secondary); margin-bottom:20px;">Choose a plan and get connected in minutes.</p>
+        <p style="font-size:1.1rem; color:var(--text-secondary); margin-bottom:20px;">Choose a plan below and get connected in minutes.</p>
     </div>
-    <div class="card"><div class="card-header">Choose a Plan</div>
-    <form method="GET" action="/sms-verify"><input type="hidden" name="pid" value="{pid}"><label>Your Phone Number *</label><input type="tel" name="phone" required><label>Select Plan</label><select name="plan_id" required>{get_plan_options(pid)}</select><button type="submit" class="btn" style="margin-top:20px;width:100%;">Continue to Payment</button></form></div>
-    <p style="text-align:center;margin-top:15px;"><a href="/redeem?pid={pid}" class="btn btn-outline">Already have a voucher?</a> <a href="/subscriber-login?pid={pid}" class="btn btn-outline" style="margin-left:10px;">Subscriber Login</a></p>
-    <p style="text-align:center;margin-top:10px;"><a href="/free-trial?pid={pid}" class="btn btn-outline" style="background: linear-gradient(135deg, #28a745, #51cf66); color:white; border:none;">🎁 Free 5-Minute Trial</a></p>
+
+    <!-- Cards Grid: Login, Redeem, and Packages -->
+    <div class="card-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:20px; margin-bottom:30px;">
+
+        <!-- Login Card -->
+        <div class="card package-card" style="text-align:center; display:flex; flex-direction:column; justify-content:space-between;">
+            <div>
+                <h3 style="margin-bottom:10px;">🔐 Login</h3>
+                <p style="font-size:0.9rem; color:var(--text-secondary);">Already have an account?<br>Login to manage your sessions.</p>
+            </div>
+            <a href="/subscriber-login?pid={pid}" class="btn" style="margin-top:15px; width:100%;">Login</a>
+        </div>
+
+        <!-- Redeem Card -->
+        <div class="card package-card" style="text-align:center; display:flex; flex-direction:column; justify-content:space-between;">
+            <div>
+                <h3 style="margin-bottom:10px;">🎟️ Redeem Voucher</h3>
+                <p style="font-size:0.9rem; color:var(--text-secondary);">Have a voucher code?<br>Redeem it here to get connected.</p>
+            </div>
+            <a href="/redeem?pid={pid}" class="btn" style="margin-top:15px; width:100%;">Redeem</a>
+        </div>
+
+        <!-- Package Cards -->
+        {package_cards}
+    </div>
+
+    <!-- Free Trial Link -->
+    <p style="text-align:center; margin-top:10px;">
+        <a href="/free-trial?pid={pid}" class="btn btn-outline" style="background: linear-gradient(135deg, #28a745, #51cf66); color:white; border:none; padding:12px 30px;">🎁 Try 5 Minutes Free</a>
+    </p>
     '''
 
-    # Pass the theme CSS (empty for 'default') to render_page
     return render_page("Get Internet Access", content, get_pending_count(pid), pid, admin=False, theme_style=theme_css)
 
 @app.route('/free-trial')
