@@ -2505,26 +2505,38 @@ def settings():
     provider = get_provider(pid)
     tab = request.args.get('tab', 'general')
 
-    # Handle POST for each tab
+    # ========== HANDLE POST ==========
     if request.method == 'POST':
         tab = request.form.get('tab', 'general')
+
         if tab == 'general':
+            # Update business name, support phone, poster, logo
             business_name = request.form['business_name']
             support_phone = request.form.get('support_phone', '')
             poster = request.files.get('poster')
             logo = request.files.get('logo')
+
             poster_filename = provider['poster_image'] if provider else None
             logo_filename = provider['logo_image'] if provider else None
+
             if poster and poster.filename and allowed_file(poster.filename):
                 poster_filename = secure_filename(poster.filename)
                 poster.save(os.path.join(app.config['UPLOAD_FOLDER'], poster_filename))
             if logo and logo.filename and allowed_file(logo.filename):
                 logo_filename = secure_filename(logo.filename)
                 logo.save(os.path.join(app.config['UPLOAD_FOLDER'], logo_filename))
-            db.execute("UPDATE providers SET business_name=?, support_phone=?, poster_image=?, logo_image=? WHERE id=?",
-                       (business_name, support_phone, poster_filename, logo_filename, pid))
+
+            db.execute("""
+                UPDATE providers 
+                SET business_name=?, support_phone=?, poster_image=?, logo_image=? 
+                WHERE id=?
+            """, (business_name, support_phone, poster_filename, logo_filename, pid))
             db.commit()
             session['provider_name'] = business_name
+
+            # Save the selected theme
+            theme = request.form.get('captive_portal_theme', 'classic')
+            set_setting(pid, 'captive_portal_theme', theme)
 
         elif tab == 'payments':
             mtn = request.form.get('mtn_number', '')
@@ -2532,8 +2544,11 @@ def settings():
             yo_user = request.form.get('yo_username', '')
             yo_pass = request.form.get('yo_password', '')
             yo_auto = 1 if request.form.get('yo_auto_pay') else 0
-            db.execute("UPDATE providers SET mtn_number=?, airtel_number=?, yo_username=?, yo_password=?, yo_auto_pay=? WHERE id=?",
-                       (mtn, airtel, yo_user, yo_pass, yo_auto, pid))
+            db.execute("""
+                UPDATE providers 
+                SET mtn_number=?, airtel_number=?, yo_username=?, yo_password=?, yo_auto_pay=? 
+                WHERE id=?
+            """, (mtn, airtel, yo_user, yo_pass, yo_auto, pid))
             db.commit()
 
         elif tab == 'pppoe':
@@ -2559,10 +2574,10 @@ def settings():
 
         return redirect(url_for('settings', tab=tab))
 
-    # GET – build the settings page
-    # Gather data for each tab
-    general_data = provider
-    payment_data = provider
+    # ========== HANDLE GET ==========
+    # Load current values for each tab
+    current_theme = get_setting(pid, 'captive_portal_theme', 'classic')
+
     pppoe_data = {
         'radius_server': get_setting(pid, 'pppoe_radius_server', ''),
         'nas_ip': get_setting(pid, 'pppoe_nas_ip', ''),
@@ -2597,10 +2612,19 @@ def settings():
     ]
     nav = ''.join(f'<a href="/settings?tab={t[0]}" class="tab {"active" if tab==t[0] else ""}">{t[1]}</a>' for t in tabs)
 
-    # Build content per tab
+    # ========== BUILD CONTENT PER TAB ==========
     if tab == 'general':
         poster_preview = f'<p>Current poster: <img src="/static/uploads/{provider["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if provider and provider['poster_image'] else ''
         logo_preview = f'<p>Current logo: <img src="/static/uploads/{provider["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if provider and provider['logo_image'] else ''
+
+        theme_options = f'''
+        <select name="captive_portal_theme" style="width:auto; min-width:200px;">
+            <option value="classic" {"selected" if current_theme == 'classic' else ""}>Classic – Clean & Professional</option>
+            <option value="modern" {"selected" if current_theme == 'modern' else ""}>Modern – Dark & Bold</option>
+            <option value="minimalist" {"selected" if current_theme == 'minimalist' else ""}>Minimalist – Light & Minimal</option>
+        </select>
+        '''
+
         content = f'''
         <div class="card">
             <div class="card-header">General Settings</div>
@@ -2616,10 +2640,14 @@ def settings():
                 <label>Business Logo</label>
                 <input type="file" name="logo" accept="image/*">
                 {logo_preview}
+                <label>Captive Portal Theme</label>
+                {theme_options}
+                <small style="display:block; color:var(--text-secondary); margin-top:5px;">Choose the look of your WiFi login page.</small>
                 <button type="submit" class="btn" style="margin-top:20px;">Save General Settings</button>
             </form>
         </div>
         '''
+
     elif tab == 'payments':
         content = f'''
         <div class="card">
@@ -2635,11 +2663,15 @@ def settings():
                 <input type="text" name="yo_username" value="{provider["yo_username"] if provider else ''}">
                 <label>Yo! Payments Password</label>
                 <input type="password" name="yo_password" value="{provider["yo_password"] if provider else ''}">
-                <label><input type="checkbox" name="yo_auto_pay" {"checked" if provider and provider["yo_auto_pay"] else ""}> Enable Yo! Auto‑Pay</label>
+                <label>
+                    <input type="checkbox" name="yo_auto_pay" {"checked" if provider and provider["yo_auto_pay"] else ""}>
+                    Enable Yo! Auto‑Pay
+                </label>
                 <button type="submit" class="btn" style="margin-top:20px;">Save Payment Settings</button>
             </form>
         </div>
         '''
+
     elif tab == 'pppoe':
         content = f'''
         <div class="card">
@@ -2656,6 +2688,7 @@ def settings():
             </form>
         </div>
         '''
+
     elif tab == 'hotspot':
         content = f'''
         <div class="card">
@@ -2670,6 +2703,7 @@ def settings():
             </form>
         </div>
         '''
+
     elif tab == 'sms':
         content = f'''
         <div class="card">
@@ -2684,6 +2718,7 @@ def settings():
             </form>
         </div>
         '''
+
     elif tab == 'whatsapp':
         content = f'''
         <div class="card">
@@ -2698,6 +2733,7 @@ def settings():
             </form>
         </div>
         '''
+
     elif tab == 'notifications':
         content = f'''
         <div class="card">
@@ -2712,19 +2748,17 @@ def settings():
             </form>
         </div>
         '''
+
     else:
         content = '<div class="card"><p>Select a tab to configure settings.</p></div>'
 
+    # Wrap with tabs navigation
     full_content = f'''
     <div class="tabs" style="margin-bottom:20px;">{nav}</div>
     {content}
     '''
-    return render_page("Settings", full_content, get_pending_count(pid), pid, admin=True)
 
-@app.route('/billing')
-@login_required
-def billing():
-    return render_page("Billing & Subscription", '<div class="card"><p>Billing details and subscription management coming soon.</p></div>', get_pending_count(session['provider_id']), session['provider_id'], admin=True)
+    return render_page("Settings", full_content, get_pending_count(pid), pid, admin=True)
 
 @app.route('/system-users')
 @login_required
