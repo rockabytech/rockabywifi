@@ -1884,16 +1884,44 @@ def payments():
     <div class="tabs"><a href="/payments?filter=all" class="tab active">All</a><a href="/payments?filter=checked" class="tab">Checked</a><a href="/payments?filter=unchecked" class="tab">Unchecked</a></div>
     <table><thead><tr><th>User</th><th>Phone</th><th>Receipt No.</th><th>Amount</th><th>Checked</th><th>Paid At</th><th>Action</th></tr></thead><tbody>{rows}</tbody></table></div>'''
     return render_page("Payments", content, get_pending_count(pid), pid, admin=True)
-
+    
 @app.route('/record-payment', methods=['GET','POST'])
 @login_required
 def record_payment():
+    # Get provider_id from the session (available after login)
+    provider_id = session['provider_id']
+
     if request.method == 'POST':
-        db = get_db(); db.execute("INSERT INTO voucher_requests (provider_id,phone_number,plan_id,raw_sms,transaction_id,amount,recipient,payment_date,status) VALUES (?,'manual',1,'manual',?,?,'manual',date('now'),'approved')",
-                   (session['provider_id'], request.form['receipt'], float(request.form['amount']))); db.commit()
+        db = get_db()
+        # Insert a manually recorded payment (approve instantly)
+        db.execute("""
+            INSERT INTO voucher_requests 
+            (provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status)
+            VALUES (?, 'manual', 1, 'manual', ?, ?, 'manual', date('now'), 'approved')
+        """, (provider_id, request.form['receipt'], float(request.form['amount'])))
+        db.commit()
         return redirect('/payments')
-    return render_page("Record Payment",'''<div class="card"><div class="card-header">Record Payment</div>
-    <form method="POST"><label>Receipt Number*</label><input type="text" name="receipt" required><label>Amount (UGX)*</label><input type="number" name="amount" step="0.01" required><button type="submit" class="btn" style="margin-top:20px;">Create</button></form></div>''', get_pending_count(pid), pid, admin=True)
+
+    # GET request – render the payment form
+    html = '''
+    <div class="card">
+        <div class="card-header">Record Payment</div>
+        <form method="POST">
+            <label>Receipt Number*</label>
+            <input type="text" name="receipt" required>
+            <label>Amount (UGX)*</label>
+            <input type="number" name="amount" step="0.01" required>
+            <button type="submit" class="btn" style="margin-top:20px;">Create</button>
+        </form>
+    </div>
+    '''
+    return render_page(
+        "Record Payment",
+        html,
+        get_pending_count(provider_id),   # fix: use provider_id
+        provider_id,                      # fix: use provider_id
+        admin=True
+    )
 
 @app.route('/approve/<int:rid>')
 @login_required
