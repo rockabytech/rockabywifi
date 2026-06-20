@@ -57,6 +57,42 @@ def mt_remove_user(username):
         api.close(); return True
     except: return False
 
+def mt_get_active_users(pid):
+    """
+    Fetch active hotspot and PPPoE users from the MikroTik router(s)
+    associated with the given provider_id.
+    """
+    # For now we use a single global router; you can later expand to per-provider routers
+    api = mt_connect()
+    if not api:
+        return {'hotspot': [], 'ppp': []}
+    
+    hotspot = []
+    ppp = []
+    try:
+        # Hotspot active users
+        for u in api(cmd='/ip/hotspot/active/print'):
+            hotspot.append({
+                'username': u.get('user', ''),
+                'ip': u.get('address', ''),
+                'mac': u.get('mac-address', ''),
+                'uptime': u.get('uptime', '')
+            })
+        # PPPoE active users
+        for u in api(cmd='/ppp/active/print'):
+            ppp.append({
+                'username': u.get('name', ''),
+                'ip': u.get('address', ''),
+                'mac': u.get('caller-id', ''),
+                'uptime': u.get('uptime', '')
+            })
+    except Exception as e:
+        print(f"Error fetching active users: {e}")
+    finally:
+        api.close()
+    
+    return {'hotspot': hotspot, 'ppp': ppp}
+
 # ------------------------------------------------------------
 # DATABASE
 # ------------------------------------------------------------
@@ -1409,82 +1445,64 @@ def active_users():
     pid = session['provider_id']
     db = get_db()
     
-    vouchers = db.execute(
-        "SELECT v.id, v.code, v.phone_number, p.name as pn, v.created_at "
-        "FROM vouchers v JOIN plans p ON v.plan_id=p.id "
-        "WHERE v.provider_id=? AND v.used=0", (pid,)
-    ).fetchall()
-    
-    subs = db.execute(
-        "SELECT s.id as sid, sub.username, sub.phone, s.ip_address, s.started_at "
-        "FROM sessions s JOIN subscribers sub ON s.subscriber_id=sub.id "
-        "WHERE s.provider_id=?", (pid,)
-    ).fetchall()
+    # Get live data from MikroTik
+    live = mt_get_active_users(pid)
+    hotspot_users = live.get('hotspot', [])
+    ppp_users = live.get('ppp', [])
     
     rows = ''
     
-    for v in vouchers:
+    # Hotspot users
+    for u in hotspot_users:
+        username = u['username']
         rows += f'''
         <tr>
-            <td>{v["code"]}</td>
-            <td>{v["phone_number"]}</td>
+            <td>{username}</td>
+            <td>{u['ip']}</td>
+            <td>{u['mac']}</td>
             <td>Hotspot</td>
-            <td>{v["pn"]}</td>
-            <td>{v["created_at"]}</td>
-            <td>-</td>
+            <td>{u['uptime']}</td>
             <td>
-                <div class="dropdown" style="position:relative;display:inline-block;z-index:9999;">
-                    <button class="btn btn-small">&#8942;</button>
-                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;min-width:150px;white-space:nowrap;">
-                        <a href="/disconnect-voucher/{v["id"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;">Disconnect</a>
-                        <a href="/disconnect-voucher-until-payment/{v["id"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;">Disconnect until payment</a>
-                    </div>
-                </div>
+                <a href="/disconnect-active/{username}?type=hotspot" class="btn btn-small btn-danger" onclick="return confirm('Disconnect {username}?')">Disconnect</a>
             </td>
         </tr>
         '''
     
-    for s in subs:
+    # PPPoE users
+    for u in ppp_users:
+        username = u['username']
         rows += f'''
         <tr>
-            <td>{s["username"]}</td>
-            <td>{s["phone"] or ""}</td>
+            <td>{username}</td>
+            <td>{u['ip']}</td>
+            <td>{u['mac']}</td>
             <td>PPPoE</td>
-            <td>{s["ip_address"]}</td>
-            <td>{s["started_at"]}</td>
-            <td>-</td>
+            <td>{u['uptime']}</td>
             <td>
-                <div class="dropdown" style="position:relative;display:inline-block;z-index:9999;">
-                    <button class="btn btn-small">&#8942;</button>
-                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;min-width:150px;white-space:nowrap;">
-                        <a href="/disconnect-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;">Disconnect</a>
-                        <a href="/suspend-subscriber/{s["sid"]}" style="display:block;padding:8px 16px;color:var(--text);text-decoration:none;">Disconnect until payment</a>
-                    </div>
-                </div>
+                <a href="/disconnect-active/{username}?type=ppp" class="btn btn-small btn-danger" onclick="return confirm('Disconnect {username}?')">Disconnect</a>
             </td>
         </tr>
         '''
     
     if not rows:
-        rows = '<tr><td colspan="7">No active users at the moment.</td></tr>'
+        rows = '<tr><td colspan="6">No active users found on the router(s).</td></tr>'
     
     content = f'''
     <div class="card">
-        <div class="card-header">Active Users</div>
-        <div class="tabs">
-            <span class="tab active">All <span class="badge">{len(vouchers)+len(subs)}</span></span>
-            <span class="tab">Hotspot <span class="badge">{len(vouchers)}</span></span>
-            <span class="tab">PPPoE <span class="badge">{len(subs)}</span></span>
+        <div class="card-header">
+            🔴 Active Users (Live)
+            <span class="badge" style="background:#28a745; color:#fff;">{len(hotspot_users) + len(ppp_users)} online</span>
+            <a href="/active-users" class="btn btn-small" style="float:right;">🔄 Refresh</a>
         </div>
-        <div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+        <div class="table-responsive" style="overflow-x:auto;">
             <table>
                 <thead>
                     <tr>
                         <th>Username</th>
-                        <th>IP/MAC</th>
-                        <th>Router</th>
-                        <th>Session Start</th>
-                        <th>Session End</th>
+                        <th>IP Address</th>
+                        <th>MAC Address</th>
+                        <th>Type</th>
+                        <th>Uptime</th>
                         <th>Action</th>
                     </tr>
                 </thead>
@@ -1492,8 +1510,40 @@ def active_users():
             </table>
         </div>
     </div>
+    <script>
+        // Auto-refresh every 30 seconds
+        setTimeout(function() {{
+            location.reload();
+        }}, 30000);
+    </script>
     '''
+    
     return render_page("Active Users", content, get_pending_count(pid), pid, admin=True)
+    
+@app.route('/disconnect-active/<username>')
+@login_required
+def disconnect_active(username):
+    # Get the type (hotspot or ppp) from the query string
+    user_type = request.args.get('type', 'hotspot')
+    api = mt_connect()
+    if not api:
+        return "Could not connect to MikroTik", 500
+    
+    try:
+        if user_type == 'hotspot':
+            api(cmd='/ip/hotspot/active/remove', **{'user': username})
+        elif user_type == 'ppp':
+            api(cmd='/ppp/active/remove', **{'name': username})
+        else:
+            return "Invalid type", 400
+    except Exception as e:
+        return f"Error disconnecting: {e}", 500
+    finally:
+        api.close()
+    
+    # Also optionally update the database (mark voucher as used, etc.)
+    # but the router is the source of truth.
+    return redirect(url_for('active_users'))
 
 @app.route('/disconnect-voucher/<int:vid>')
 @login_required
