@@ -540,8 +540,8 @@ base_template = """
                 font-size: 1.5rem !important;
             }
         }
+        {theme_style}   <!-- THEME CSS INJECTED INSIDE THE STYLE BLOCK -->
     </style>
-    {theme_style}   <!-- INJECT THEME-SPECIFIC CSS HERE -->
 </head>
 <body class="{layout_class}">
     {sidebar_html}
