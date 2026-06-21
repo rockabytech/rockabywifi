@@ -2812,14 +2812,28 @@ def settings():
             set_setting(pid, 'captive_portal_theme', theme)
 
         elif tab == 'payments':
+            # Save MTN/Airtel and Yo! Payments
             mtn = request.form.get('mtn_number', '')
             airtel = request.form.get('airtel_number', '')
             yo_user = request.form.get('yo_username', '')
             yo_pass = request.form.get('yo_password', '')
             yo_auto = 1 if request.form.get('yo_auto_pay') else 0
-            # Save payment method selection
+
+            # Save active payment method
             active_method = request.form.get('active_payment_method', 'manual')
             set_setting(pid, 'active_payment_method', active_method)
+
+            # Save IOTEC credentials
+            set_setting(pid, 'iotec_api_key', request.form.get('iotec_api_key', ''))
+            set_setting(pid, 'iotec_merchant_id', request.form.get('iotec_merchant_id', ''))
+
+            # Save PawaPay credentials
+            set_setting(pid, 'pawapay_api_key', request.form.get('pawapay_api_key', ''))
+            set_setting(pid, 'pawapay_merchant_id', request.form.get('pawapay_merchant_id', ''))
+
+            # Save PesaPal credentials
+            set_setting(pid, 'pesapal_consumer_key', request.form.get('pesapal_consumer_key', ''))
+            set_setting(pid, 'pesapal_consumer_secret', request.form.get('pesapal_consumer_secret', ''))
 
             db.execute("""
                 UPDATE providers 
@@ -2855,6 +2869,14 @@ def settings():
     # Load current values for each tab
     current_theme = get_setting(pid, 'captive_portal_theme', 'default')
     active_payment_method = get_setting(pid, 'active_payment_method', 'manual')
+
+    # Load credentials for all payment methods
+    iotec_api_key = get_setting(pid, 'iotec_api_key', '')
+    iotec_merchant_id = get_setting(pid, 'iotec_merchant_id', '')
+    pawapay_api_key = get_setting(pid, 'pawapay_api_key', '')
+    pawapay_merchant_id = get_setting(pid, 'pawapay_merchant_id', '')
+    pesapal_consumer_key = get_setting(pid, 'pesapal_consumer_key', '')
+    pesapal_consumer_secret = get_setting(pid, 'pesapal_consumer_secret', '')
 
     pppoe_data = {
         'radius_server': get_setting(pid, 'pppoe_radius_server', ''),
@@ -2931,9 +2953,9 @@ def settings():
         payment_methods = [
             ('manual', 'Manual (SMS Verification)'),
             ('yo', 'Yo! Payments'),
-            ('iotec', 'IOTEC (Coming Soon)'),
-            ('pawapay', 'PawaPay (Coming Soon)'),
-            ('pesapal', 'PesaPal (Coming Soon)'),
+            ('iotec', 'IOTEC'),
+            ('pawapay', 'PawaPay'),
+            ('pesapal', 'PesaPal'),
         ]
         method_options = ''.join(
             f'<option value="{val}" {"selected" if active_payment_method == val else ""}>{label}</option>'
@@ -2945,10 +2967,12 @@ def settings():
             <div class="card-header">Payment Settings</div>
             <form method="POST">
                 <input type="hidden" name="tab" value="payments">
+
                 <label>MTN Mobile Money Number</label>
                 <input type="text" name="mtn_number" value="{provider["mtn_number"] if provider else ''}">
                 <label>Airtel Money Number</label>
                 <input type="text" name="airtel_number" value="{provider["airtel_number"] if provider else ''}">
+
                 <hr>
                 <label>Yo! Payments Username</label>
                 <input type="text" name="yo_username" value="{provider["yo_username"] if provider else ''}">
@@ -2958,12 +2982,35 @@ def settings():
                     <input type="checkbox" name="yo_auto_pay" {"checked" if provider and provider["yo_auto_pay"] else ""}>
                     Enable Yo! Auto‑Pay
                 </label>
+
+                <hr>
+                <h4>IOTEC Settings</h4>
+                <label>API Key</label>
+                <input type="text" name="iotec_api_key" value="{iotec_api_key}">
+                <label>Merchant ID</label>
+                <input type="text" name="iotec_merchant_id" value="{iotec_merchant_id}">
+
+                <hr>
+                <h4>PawaPay Settings</h4>
+                <label>API Key</label>
+                <input type="text" name="pawapay_api_key" value="{pawapay_api_key}">
+                <label>Merchant ID</label>
+                <input type="text" name="pawapay_merchant_id" value="{pawapay_merchant_id}">
+
+                <hr>
+                <h4>PesaPal Settings</h4>
+                <label>Consumer Key</label>
+                <input type="text" name="pesapal_consumer_key" value="{pesapal_consumer_key}">
+                <label>Consumer Secret</label>
+                <input type="password" name="pesapal_consumer_secret" value="{pesapal_consumer_secret}">
+
                 <hr>
                 <label>Default Payment Method (used on the captive portal)</label>
                 <select name="active_payment_method" style="width:auto; min-width:200px;">
                     {method_options}
                 </select>
                 <small style="display:block; color:var(--text-secondary); margin-top:5px;">Choose which payment method users will see when buying internet.</small>
+
                 <button type="submit" class="btn" style="margin-top:20px;">Save Payment Settings</button>
             </form>
         </div>
