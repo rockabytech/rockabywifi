@@ -2823,15 +2823,16 @@ def settings():
             active_method = request.form.get('active_payment_method', 'manual')
             set_setting(pid, 'active_payment_method', active_method)
 
-            # Save IOTEC credentials
-            set_setting(pid, 'iotec_api_key', request.form.get('iotec_api_key', ''))
-            set_setting(pid, 'iotec_merchant_id', request.form.get('iotec_merchant_id', ''))
+            # ===== IOTEC Credentials =====
+            set_setting(pid, 'iotec_wallet_id', request.form.get('iotec_wallet_id', ''))
+            set_setting(pid, 'iotec_client_id', request.form.get('iotec_client_id', ''))
+            set_setting(pid, 'iotec_api_secret', request.form.get('iotec_api_secret', ''))
 
-            # Save PawaPay credentials
+            # ===== PawaPay Credentials =====
             set_setting(pid, 'pawapay_api_key', request.form.get('pawapay_api_key', ''))
             set_setting(pid, 'pawapay_merchant_id', request.form.get('pawapay_merchant_id', ''))
 
-            # Save PesaPal credentials
+            # ===== PesaPal Credentials =====
             set_setting(pid, 'pesapal_consumer_key', request.form.get('pesapal_consumer_key', ''))
             set_setting(pid, 'pesapal_consumer_secret', request.form.get('pesapal_consumer_secret', ''))
 
@@ -2871,8 +2872,9 @@ def settings():
     active_payment_method = get_setting(pid, 'active_payment_method', 'manual')
 
     # Load credentials for all payment methods
-    iotec_api_key = get_setting(pid, 'iotec_api_key', '')
-    iotec_merchant_id = get_setting(pid, 'iotec_merchant_id', '')
+    iotec_wallet_id = get_setting(pid, 'iotec_wallet_id', '')
+    iotec_client_id = get_setting(pid, 'iotec_client_id', '')
+    iotec_api_secret = get_setting(pid, 'iotec_api_secret', '')
     pawapay_api_key = get_setting(pid, 'pawapay_api_key', '')
     pawapay_merchant_id = get_setting(pid, 'pawapay_merchant_id', '')
     pesapal_consumer_key = get_setting(pid, 'pesapal_consumer_key', '')
@@ -2962,21 +2964,28 @@ def settings():
             for val, label in payment_methods
         )
 
+        # Generate callback URLs for each method
+        iotec_callback_url = url_for('iotec_callback', _external=True)
+        pawapay_callback_url = url_for('pawapay_callback', _external=True)
+        pesapal_callback_url = url_for('pesapal_callback', _external=True)
+
         content = f'''
         <div class="card">
             <div class="card-header">Payment Settings</div>
             <form method="POST">
                 <input type="hidden" name="tab" value="payments">
 
+                <h4>MTN / Airtel (for Manual SMS)</h4>
                 <label>MTN Mobile Money Number</label>
                 <input type="text" name="mtn_number" value="{provider["mtn_number"] if provider else ''}">
                 <label>Airtel Money Number</label>
                 <input type="text" name="airtel_number" value="{provider["airtel_number"] if provider else ''}">
 
                 <hr>
-                <label>Yo! Payments Username</label>
+                <h4>Yo! Payments</h4>
+                <label>Username</label>
                 <input type="text" name="yo_username" value="{provider["yo_username"] if provider else ''}">
-                <label>Yo! Payments Password</label>
+                <label>Password</label>
                 <input type="password" name="yo_password" value="{provider["yo_password"] if provider else ''}">
                 <label>
                     <input type="checkbox" name="yo_auto_pay" {"checked" if provider and provider["yo_auto_pay"] else ""}>
@@ -2984,25 +2993,36 @@ def settings():
                 </label>
 
                 <hr>
-                <h4>IOTEC Settings</h4>
-                <label>API Key</label>
-                <input type="text" name="iotec_api_key" value="{iotec_api_key}">
-                <label>Merchant ID</label>
-                <input type="text" name="iotec_merchant_id" value="{iotec_merchant_id}">
+                <h4>IOTEC</h4>
+                <label>Wallet ID</label>
+                <input type="text" name="iotec_wallet_id" value="{iotec_wallet_id}">
+                <label>Client ID</label>
+                <input type="text" name="iotec_client_id" value="{iotec_client_id}">
+                <label>API Secret</label>
+                <input type="password" name="iotec_api_secret" value="{iotec_api_secret}">
+                <label>Callback URL</label>
+                <input type="text" readonly value="{iotec_callback_url}" style="background:var(--bg);">
+                <small style="display:block; color:var(--text-secondary);">Copy this URL and paste it in your IOTEC configuration.</small>
 
                 <hr>
-                <h4>PawaPay Settings</h4>
+                <h4>PawaPay</h4>
                 <label>API Key</label>
                 <input type="text" name="pawapay_api_key" value="{pawapay_api_key}">
                 <label>Merchant ID</label>
                 <input type="text" name="pawapay_merchant_id" value="{pawapay_merchant_id}">
+                <label>Callback URL</label>
+                <input type="text" readonly value="{pawapay_callback_url}" style="background:var(--bg);">
+                <small style="display:block; color:var(--text-secondary);">Copy this URL and paste it in your PawaPay configuration.</small>
 
                 <hr>
-                <h4>PesaPal Settings</h4>
+                <h4>PesaPal</h4>
                 <label>Consumer Key</label>
                 <input type="text" name="pesapal_consumer_key" value="{pesapal_consumer_key}">
                 <label>Consumer Secret</label>
                 <input type="password" name="pesapal_consumer_secret" value="{pesapal_consumer_secret}">
+                <label>Callback URL</label>
+                <input type="text" readonly value="{pesapal_callback_url}" style="background:var(--bg);">
+                <small style="display:block; color:var(--text-secondary);">Copy this URL and paste it in your PesaPal configuration.</small>
 
                 <hr>
                 <label>Default Payment Method (used on the captive portal)</label>
