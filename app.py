@@ -1184,6 +1184,23 @@ def yo_callback():
                 db.execute("UPDATE yo_tx SET status='completed', voucher_code=? WHERE tx_ref=?",(code, tx_ref)); db.commit(); mt_add_user(tx['phone'], plan['duration_minutes'])
     return 'OK', 200
 
+@app.route('/iotec-callback', methods=['POST'])
+def iotec_callback():
+    # IOTEC will send payment confirmation here
+    # For now, just log and return OK
+    print("IOTEC callback received")
+    return 'OK', 200
+
+@app.route('/pawapay-callback', methods=['POST'])
+def pawapay_callback():
+    print("PawaPay callback received")
+    return 'OK', 200
+
+@app.route('/pesapal-callback', methods=['POST'])
+def pesapal_callback():
+    print("PesaPal callback received")
+    return 'OK', 200
+
 @app.route('/subscriber-login', methods=['GET','POST'])
 def subscriber_login():
     pid = request.args.get('pid', 1, type=int)
