@@ -4061,9 +4061,20 @@ def edit_provider_admin(pid):
             mtn = request.form.get('mtn', '')
             airtel = request.form.get('airtel', '')
             support = request.form.get('support', '')
-            percent_fee = float(request.form.get('percent_fee', prov['percent_fee'] or 5.0))
-            monthly_fee = int(request.form.get('monthly_fee', prov['monthly_fee_ugx'] or 20000))
             new_password = request.form.get('password', '')
+
+            # Handle empty string values for numeric fields
+            percent_fee_str = request.form.get('percent_fee', '')
+            if percent_fee_str.strip() == '':
+                percent_fee = prov['percent_fee'] if prov['percent_fee'] is not None else 5.0
+            else:
+                percent_fee = float(percent_fee_str)
+
+            monthly_fee_str = request.form.get('monthly_fee', '')
+            if monthly_fee_str.strip() == '':
+                monthly_fee = prov['monthly_fee_ugx'] if prov['monthly_fee_ugx'] is not None else 20000
+            else:
+                monthly_fee = int(monthly_fee_str)
 
             db.execute("""
                 UPDATE providers SET
@@ -4086,7 +4097,6 @@ def edit_provider_admin(pid):
             return f"Error updating provider: {str(e)}", 500
     
     # GET – show form
-    # Use bracket access and provide fallback if None
     percent_fee = prov['percent_fee'] if prov['percent_fee'] is not None else 5.0
     monthly_fee = prov['monthly_fee_ugx'] if prov['monthly_fee_ugx'] is not None else 20000
     
