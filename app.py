@@ -3609,8 +3609,8 @@ def billing():
     platform_fee = int(total_revenue * (percent / 100))
     
     # Maintenance fee
-    monthly_fee = provider['monthly_fee_ugx'] if provider and provider['monthly_fee_ugx'] else 20000
-    total_due = platform_fee + monthly_fee
+    monthly_fee = provider['monthly_fee_ugx'] if provider and provider['monthly_fee_ugx'] is not None else 20000
+    percent = provider['percent_fee'] if provider and provider['percent_fee'] is not None else 5.0
     
     # Generate dynamic invoice number
     current_year_month = datetime.now().strftime('%Y%m')
@@ -4059,14 +4059,14 @@ def edit_provider_admin(pid):
             airtel = request.form.get('airtel', '')
             support = request.form.get('support', '')
             
-            # Handle percent_fee: if empty string, use existing or default 5.0
+            # percent_fee: allow 0, fallback only if empty string
             percent_fee_str = request.form.get('percent_fee', '').strip()
             if percent_fee_str == '':
                 percent_fee = prov['percent_fee'] if prov['percent_fee'] is not None else 5.0
             else:
                 percent_fee = float(percent_fee_str)
             
-            # Handle monthly_fee: if empty string, use existing or default 20000
+            # monthly_fee: allow 0, fallback only if empty string
             monthly_fee_str = request.form.get('monthly_fee', '').strip()
             if monthly_fee_str == '':
                 monthly_fee = prov['monthly_fee_ugx'] if prov['monthly_fee_ugx'] is not None else 20000
@@ -4095,7 +4095,7 @@ def edit_provider_admin(pid):
             traceback.print_exc()
             return f"Error updating provider: {str(e)}", 500
     
-    # GET – show form with current values
+    # GET – display the form with current values
     percent_fee = prov['percent_fee'] if prov['percent_fee'] is not None else 5.0
     monthly_fee = prov['monthly_fee_ugx'] if prov['monthly_fee_ugx'] is not None else 20000
     
