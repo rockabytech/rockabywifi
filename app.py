@@ -4056,14 +4056,13 @@ def edit_provider_admin(pid):
     
     if request.method == 'POST':
         try:
-            # Safe extraction with defaults
             business_name = request.form.get('business_name', prov['business_name'])
             contact = request.form.get('contact', prov['contact'] or '')
             mtn = request.form.get('mtn', '')
             airtel = request.form.get('airtel', '')
             support = request.form.get('support', '')
-            percent_fee = float(request.form.get('percent_fee', prov.get('percent_fee', 5.0)))
-            monthly_fee = int(request.form.get('monthly_fee', prov.get('monthly_fee_ugx', 20000)))
+            percent_fee = float(request.form.get('percent_fee', prov['percent_fee'] or 5.0))
+            monthly_fee = int(request.form.get('monthly_fee', prov['monthly_fee_ugx'] or 20000))
             new_password = request.form.get('password', '')
 
             db.execute("""
@@ -4082,12 +4081,15 @@ def edit_provider_admin(pid):
             db.commit()
             return redirect('/admin/dashboard')
         except Exception as e:
-            # Print error to logs for debugging
             import traceback
             traceback.print_exc()
             return f"Error updating provider: {str(e)}", 500
     
     # GET – show form
+    # Use bracket access and provide fallback if None
+    percent_fee = prov['percent_fee'] if prov['percent_fee'] is not None else 5.0
+    monthly_fee = prov['monthly_fee_ugx'] if prov['monthly_fee_ugx'] is not None else 20000
+    
     content = f'''
     <div class="card">
         <div class="card-header">Edit Provider: {prov["business_name"]}</div>
@@ -4107,10 +4109,10 @@ def edit_provider_admin(pid):
             <hr>
             <h4>Billing Settings</h4>
             <label>Platform Fee (%)</label>
-            <input type="number" name="percent_fee" step="0.1" value="{prov.get('percent_fee', 5.0)}" min="0" max="100">
+            <input type="number" name="percent_fee" step="0.1" value="{percent_fee}" min="0" max="100">
             <small style="color:var(--text-secondary);">Percentage taken from each transaction</small>
             <label>Monthly Maintenance Fee (UGX)</label>
-            <input type="number" name="monthly_fee" value="{prov.get('monthly_fee_ugx', 20000)}" step="1000" min="0">
+            <input type="number" name="monthly_fee" value="{monthly_fee}" step="1000" min="0">
             <small style="color:var(--text-secondary);">Fixed monthly fee charged to the provider</small>
             <button type="submit" class="btn" style="margin-top:20px;">Save Changes</button>
         </form>
