@@ -1517,6 +1517,21 @@ def yo_callback():
                 mt_add_user(tx['phone'], plan['duration_minutes'])
     return 'OK', 200
 
+@app.route('/iotec-callback', methods=['POST'])
+def iotec_callback():
+    print("IOTEC callback received")
+    return 'OK', 200
+
+@app.route('/pawapay-callback', methods=['POST'])
+def pawapay_callback():
+    print("PawaPay callback received")
+    return 'OK', 200
+
+@app.route('/pesapal-callback', methods=['POST'])
+def pesapal_callback():
+    print("PesaPal callback received")
+    return 'OK', 200
+
 
 @app.route('/subscriber-login', methods=['GET','POST'])
 def subscriber_login():
