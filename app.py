@@ -3856,6 +3856,20 @@ def super_admin_dashboard():
             </table>
         </div>
     </div>
+
+    <!-- ===== NEW: DATABASE MANAGEMENT CARD ===== -->
+    <div class="card">
+        <div class="card-header">💾 Database Management</div>
+        <div style="display:flex; gap:15px; flex-wrap:wrap;">
+            <a href="/admin/backup" class="btn btn-success"><i class="fas fa-database"></i> Create Backup</a>
+            <a href="/admin/backups" class="btn btn-outline"><i class="fas fa-list"></i> View Backups</a>
+            <a href="/admin/restore" class="btn" style="background: #ffc107; color: #000;"><i class="fas fa-upload"></i> Restore Database</a>
+        </div>
+        <small style="display:block; margin-top:10px; color:var(--text-secondary);">
+            Backups are stored in the <code>backups/</code> folder. Restoring will overwrite the current database – a backup is created automatically before restore.
+        </small>
+    </div>
+
     <div class="card">
         <div class="card-header">🕒 Recent Activity</div>
         <div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
