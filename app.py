@@ -1318,6 +1318,7 @@ def sms_verify():
         raw = request.form['raw_sms'].strip()
         parsed = parse_airtel_sms(raw) if 'TID' in raw or 'SENT.TID' in raw else parse_mtn_sms(raw)
 
+        # ----- Validation -----
         err = None
         if not parsed['tid']:
             err = "Could not detect Transaction ID."
@@ -1372,10 +1373,11 @@ def sms_verify():
         rf = f"{parsed.get('recipient_name','')} {parsed.get('recipient_number','')}".strip()
 
         if status == 'approved':
+            # 1. Generate voucher (for record)
             vc = generate_voucher_code()
             db.execute(
-                "INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number) "
-                "VALUES (?,?,?,'sms',?)",
+                "INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number, used, used_at) "
+                "VALUES (?,?,?,'sms',?,1,CURRENT_TIMESTAMP)",
                 (pid, vc, plan_id, phone)
             )
             db.execute(
@@ -1385,17 +1387,15 @@ def sms_verify():
                 (pid, phone, plan_id, raw, parsed['tid'], parsed['amount'], rf, parsed['date'], vc)
             )
             db.commit()
-            content = f'''
-            <div class="card">
-                <div class="alert alert-success">Payment verified!</div>
-                <p><strong>Your Voucher Code:</strong></p>
-                <div class="voucher-code" id="vc">{vc}</div>
-                <button class="copy-btn" onclick="navigator.clipboard.writeText('{vc}')">📋 Copy</button>
-                <p style="margin-top:10px;">Use this code on the <a href="/redeem?pid={pid}">Redeem page</a> to connect.</p>
-                <a href="/?pid={pid}" class="btn">Back to Home</a>
-            </div>
-            '''
+
+            # 2. Activate internet immediately (add user to MikroTik)
+            success = mt_add_user(phone, plan['duration_minutes'])
+
+            # 3. Redirect to Google.com (or success page)
+            return redirect("https://www.google.com")
+
         else:
+            # Pending approval – insert without voucher
             db.execute(
                 "INSERT INTO voucher_requests "
                 "(provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status) "
@@ -1409,8 +1409,7 @@ def sms_verify():
                 <p><a href="/?pid={pid}" class="btn">Back to Home</a></p>
             </div>
             '''.format(pid=pid)
-
-        return render_page("Verification Result", content, get_pending_count(pid), pid, admin=False)
+            return render_page("Verification Result", content, get_pending_count(pid), pid, admin=False)
 
     # ---- GET: handle based on active payment method ----
     if active_method == 'manual':
@@ -1462,15 +1461,14 @@ def sms_verify():
             '''
             return render_page("Yo! Payment", content, pc, pid, admin=False)
 
-    elif active_method in ['iotec', 'pawapay', 'pesapal']:
-        content = f'''
-        <div class="card">
-            <div class="card-header">Payment Method: {active_method.upper()}</div>
-            <p>This payment method is coming soon. Please check back later.</p>
-            <a href="/?pid={pid}" class="btn">Back to Home</a>
-        </div>
-        '''
-        return render_page("Payment Unavailable", content, pc, pid, admin=False)
+    elif active_method == 'iotec':
+        return redirect(url_for('pay_iotec', pid=pid, plan_id=plan_id, phone=phone))
+
+    elif active_method == 'pawapay':
+        return redirect(url_for('pay_pawapay', pid=pid, plan_id=plan_id, phone=phone))
+
+    elif active_method == 'pesapal':
+        return redirect(url_for('pay_pesapal', pid=pid, plan_id=plan_id, phone=phone))
 
     else:
         # Fallback to manual
@@ -1494,64 +1492,6 @@ def sms_verify():
         </div>
         '''
         return render_page("Verify Payment", content, pc, pid, admin=False)
-
-    # ----- GET request – handle based on active payment method -----
-    if active_method == 'manual':
-        # Show the manual SMS verification form
-        content = f'''
-        <div class="card">
-            <div class="card-header">Pay for Internet</div>
-            <p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p>
-            <p><strong>Pay to:</strong></p>
-            <p>MTN: {provider["mtn_number"] if provider and provider["mtn_number"] else 'N/A'} | Airtel: {provider["airtel_number"] if provider and provider["airtel_number"] else 'N/A'}</p>
-            <p style="color:#666;">Name: {provider["business_name"] if provider else "RockabyWiFi"}</p>
-            <hr>
-            <p style="margin-top:15px;"><strong>After payment, paste the full SMS below:</strong></p>
-            <form method="POST">
-                <input type="hidden" name="phone" value="{phone}">
-                <input type="hidden" name="plan_id" value="{plan_id}">
-                <input type="hidden" name="pid" value="{pid}">
-                <label>Paste Full MTN/Airtel SMS Here</label>
-                <textarea name="raw_sms" rows="6" required></textarea>
-                <button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button>
-            </form>
-        </div>
-        '''
-        return render_page("Verify Payment", content, pc, pid, admin=False)
-
-    elif active_method == 'yo':
-        # Check if Yo! Payments is configured
-        if not provider['yo_username'] or not provider['yo_password']:
-            return render_page("Payment Error", '<div class="card"><div class="alert alert-error">Yo! Payments is not configured. Please contact the provider.</div></div>', pc, pid, admin=False)
-        if phone:
-            # Redirect to Yo! payment
-            return redirect(url_for('yo_pay', pid=pid, phone=phone, plan_id=plan_id))
-        else:
-            # Show a phone input form
-            content = f'''
-            <div class="card">
-                <div class="card-header">Pay with Yo! Payments</div>
-                <p>You are about to purchase <strong>{plan["name"]}</strong> for UGX {plan["price_ugx"]:,}.</p>
-                <form method="GET" action="/yo-pay">
-                    <input type="hidden" name="pid" value="{pid}">
-                    <input type="hidden" name="plan_id" value="{plan_id}">
-                    <label>Your Phone Number *</label>
-                    <input type="tel" name="phone" required>
-                    <button type="submit" class="btn" style="margin-top:20px;width:100%;">Pay Now</button>
-                </form>
-            </div>
-            '''
-            return render_page("Yo! Payment", content, pc, pid, admin=False)
-
-    elif active_method in ['iotec', 'pawapay', 'pesapal']:
-        content = f'''
-        <div class="card">
-            <div class="card-header">Payment Method: {active_method.upper()}</div>
-            <p>This payment method is coming soon. Please check back later.</p>
-            <a href="/?pid={pid}" class="btn">Back to Home</a>
-        </div>
-        '''
-        return render_page("Payment Unavailable", content, pc, pid, admin=False)
 
     else:
         # Fallback to manual
