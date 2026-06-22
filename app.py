@@ -3131,22 +3131,18 @@ def settings():
         tab = request.form.get('tab', 'general')
 
         if tab == 'general':
-            # Update business name, support phone, poster, logo
             business_name = request.form['business_name']
             support_phone = request.form.get('support_phone', '')
             poster = request.files.get('poster')
             logo = request.files.get('logo')
-
             poster_filename = provider['poster_image'] if provider else None
             logo_filename = provider['logo_image'] if provider else None
-
             if poster and poster.filename and allowed_file(poster.filename):
                 poster_filename = secure_filename(poster.filename)
                 poster.save(os.path.join(app.config['UPLOAD_FOLDER'], poster_filename))
             if logo and logo.filename and allowed_file(logo.filename):
                 logo_filename = secure_filename(logo.filename)
                 logo.save(os.path.join(app.config['UPLOAD_FOLDER'], logo_filename))
-
             db.execute("""
                 UPDATE providers 
                 SET business_name=?, support_phone=?, poster_image=?, logo_image=? 
@@ -3154,36 +3150,29 @@ def settings():
             """, (business_name, support_phone, poster_filename, logo_filename, pid))
             db.commit()
             session['provider_name'] = business_name
-
-            # Save the selected theme
             theme = request.form.get('captive_portal_theme', 'default')
             set_setting(pid, 'captive_portal_theme', theme)
 
         elif tab == 'payments':
-            # Save MTN/Airtel and Yo! Payments
             mtn = request.form.get('mtn_number', '')
             airtel = request.form.get('airtel_number', '')
             yo_user = request.form.get('yo_username', '')
             yo_pass = request.form.get('yo_password', '')
             yo_auto = 1 if request.form.get('yo_auto_pay') else 0
-
-            # Save active payment method
             active_method = request.form.get('active_payment_method', 'manual')
             set_setting(pid, 'active_payment_method', active_method)
-
-            # ===== IOTEC Credentials =====
+            # Save payment name
+            set_setting(pid, 'payment_name', request.form.get('payment_name', ''))
+            # IOTEC
             set_setting(pid, 'iotec_wallet_id', request.form.get('iotec_wallet_id', ''))
             set_setting(pid, 'iotec_client_id', request.form.get('iotec_client_id', ''))
             set_setting(pid, 'iotec_api_secret', request.form.get('iotec_api_secret', ''))
-
-            # ===== PawaPay Credentials =====
+            # PawaPay
             set_setting(pid, 'pawapay_api_key', request.form.get('pawapay_api_key', ''))
             set_setting(pid, 'pawapay_merchant_id', request.form.get('pawapay_merchant_id', ''))
-
-            # ===== PesaPal Credentials =====
+            # PesaPal
             set_setting(pid, 'pesapal_consumer_key', request.form.get('pesapal_consumer_key', ''))
             set_setting(pid, 'pesapal_consumer_secret', request.form.get('pesapal_consumer_secret', ''))
-
             db.execute("""
                 UPDATE providers 
                 SET mtn_number=?, airtel_number=?, yo_username=?, yo_password=?, yo_auto_pay=? 
@@ -3215,11 +3204,10 @@ def settings():
         return redirect(url_for('settings', tab=tab))
 
     # ========== HANDLE GET ==========
-    # Load current values for each tab
     current_theme = get_setting(pid, 'captive_portal_theme', 'default')
     active_payment_method = get_setting(pid, 'active_payment_method', 'manual')
+    payment_name = get_setting(pid, 'payment_name', '')
 
-    # Load credentials for all payment methods
     iotec_wallet_id = get_setting(pid, 'iotec_wallet_id', '')
     iotec_client_id = get_setting(pid, 'iotec_client_id', '')
     iotec_api_secret = get_setting(pid, 'iotec_api_secret', '')
@@ -3250,8 +3238,7 @@ def settings():
         'notify_sms': get_setting(pid, 'notify_sms', ''),
     }
 
-    # Build tab navigation
-    tabs = [
+    tabs_list = [
         ('general', 'General'),
         ('payments', 'Payments'),
         ('pppoe', 'PPPoE'),
@@ -3260,13 +3247,12 @@ def settings():
         ('whatsapp', 'WhatsApp'),
         ('notifications', 'Notifications'),
     ]
-    nav = ''.join(f'<a href="/settings?tab={t[0]}" class="tab {"active" if tab==t[0] else ""}">{t[1]}</a>' for t in tabs)
+    nav = ''.join(f'<a href="/settings?tab={t[0]}" class="tab {"active" if tab==t[0] else ""}">{t[1]}</a>' for t in tabs_list)
 
     # ========== BUILD CONTENT PER TAB ==========
     if tab == 'general':
         poster_preview = f'<p>Current poster: <img src="/static/uploads/{provider["poster_image"]}" style="max-width:200px;border-radius:8px;"></p>' if provider and provider['poster_image'] else ''
         logo_preview = f'<p>Current logo: <img src="/static/uploads/{provider["logo_image"]}" style="max-width:100px;border-radius:8px;"></p>' if provider and provider['logo_image'] else ''
-
         theme_options = f'''
         <select name="captive_portal_theme" style="width:auto; min-width:200px;">
             <option value="default" {"selected" if current_theme == 'default' else ""}>Default – Original Design</option>
@@ -3274,7 +3260,6 @@ def settings():
             <option value="minimalist" {"selected" if current_theme == 'minimalist' else ""}>Minimalist – Clean & Simple</option>
         </select>
         '''
-
         content = f'''
         <div class="card">
             <div class="card-header">General Settings</div>
@@ -3298,8 +3283,7 @@ def settings():
         </div>
         '''
 
-        elif tab == 'payments':
-        # Build payment method options
+    elif tab == 'payments':
         payment_methods = [
             ('manual', 'Manual (SMS Verification)'),
             ('yo', 'Yo! Payments'),
@@ -3312,10 +3296,6 @@ def settings():
             for val, label in payment_methods
         )
 
-        # Load the payment name from settings
-        payment_name = get_setting(pid, 'payment_name', '')
-
-        # Generate callback URLs
         iotec_callback_url = url_for('iotec_callback', _external=True)
         pawapay_callback_url = url_for('pawapay_callback', _external=True)
         pesapal_callback_url = url_for('pesapal_callback', _external=True)
@@ -3332,7 +3312,6 @@ def settings():
                 <label>Airtel Money Number</label>
                 <input type="text" name="airtel_number" value="{provider["airtel_number"] if provider else ''}">
 
-                <!-- NEW FIELD: Payment Name -->
                 <label>Payment Name (displayed to customers)</label>
                 <input type="text" name="payment_name" value="{payment_name}">
                 <small style="color:var(--text-secondary);">This name will appear on the payment instructions page.</small>
@@ -3472,7 +3451,6 @@ def settings():
     else:
         content = '<div class="card"><p>Select a tab to configure settings.</p></div>'
 
-    # Wrap with tabs navigation
     full_content = f'''
     <div class="tabs" style="margin-bottom:20px;">{nav}</div>
     {content}
