@@ -1318,7 +1318,6 @@ def sms_verify():
         raw = request.form['raw_sms'].strip()
         parsed = parse_airtel_sms(raw) if 'TID' in raw or 'SENT.TID' in raw else parse_mtn_sms(raw)
 
-        # ----- Validation -----
         err = None
         if not parsed['tid']:
             err = "Could not detect Transaction ID."
@@ -1355,7 +1354,6 @@ def sms_verify():
                 pc, pid, admin=False
             )
 
-        # Check duplicate transaction
         if db.execute(
             "SELECT COUNT(*) as cnt FROM voucher_requests WHERE transaction_id=? AND provider_id=?",
             (parsed['tid'], pid)
@@ -1373,7 +1371,6 @@ def sms_verify():
         rf = f"{parsed.get('recipient_name','')} {parsed.get('recipient_number','')}".strip()
 
         if status == 'approved':
-            # 1. Generate voucher (for record)
             vc = generate_voucher_code()
             db.execute(
                 "INSERT INTO vouchers (provider_id, code, plan_id, payment_method, phone_number, used, used_at) "
@@ -1387,15 +1384,12 @@ def sms_verify():
                 (pid, phone, plan_id, raw, parsed['tid'], parsed['amount'], rf, parsed['date'], vc)
             )
             db.commit()
-
-            # 2. Activate internet immediately (add user to MikroTik)
-            success = mt_add_user(phone, plan['duration_minutes'])
-
-            # 3. Redirect to Google.com (or success page)
+            # Activate internet immediately
+            mt_add_user(phone, plan['duration_minutes'])
+            # Redirect to Google (or your success page)
             return redirect("https://www.google.com")
 
         else:
-            # Pending approval – insert without voucher
             db.execute(
                 "INSERT INTO voucher_requests "
                 "(provider_id, phone_number, plan_id, raw_sms, transaction_id, amount, recipient, payment_date, status) "
@@ -1413,7 +1407,6 @@ def sms_verify():
 
     # ---- GET: handle based on active payment method ----
     if active_method == 'manual':
-        # Show manual SMS form
         content = f'''
         <div class="card">
             <div class="card-header">Pay for Internet</div>
@@ -1445,7 +1438,6 @@ def sms_verify():
         if phone:
             return redirect(url_for('yo_pay', pid=pid, phone=phone, plan_id=plan_id))
         else:
-            # Show phone input form
             content = f'''
             <div class="card">
                 <div class="card-header">Pay with Yo! Payments</div>
@@ -1469,29 +1461,6 @@ def sms_verify():
 
     elif active_method == 'pesapal':
         return redirect(url_for('pay_pesapal', pid=pid, plan_id=plan_id, phone=phone))
-
-    else:
-        # Fallback to manual
-        content = f'''
-        <div class="card">
-            <div class="card-header">Pay for Internet</div>
-            <p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p>
-            <p><strong>Pay to:</strong></p>
-            <p>MTN: {provider["mtn_number"] if provider and provider["mtn_number"] else 'N/A'} | Airtel: {provider["airtel_number"] if provider and provider["airtel_number"] else 'N/A'}</p>
-            <p style="color:#666;">Name: {provider["business_name"] if provider else "RockabyWiFi"}</p>
-            <hr>
-            <p style="margin-top:15px;"><strong>After payment, paste the full SMS below:</strong></p>
-            <form method="POST">
-                <input type="hidden" name="phone" value="{phone}">
-                <input type="hidden" name="plan_id" value="{plan_id}">
-                <input type="hidden" name="pid" value="{pid}">
-                <label>Paste Full MTN/Airtel SMS Here</label>
-                <textarea name="raw_sms" rows="6" required></textarea>
-                <button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button>
-            </form>
-        </div>
-        '''
-        return render_page("Verify Payment", content, pc, pid, admin=False)
 
     else:
         # Fallback to manual
