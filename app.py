@@ -3585,7 +3585,7 @@ def billing():
     db = get_db()
     provider = get_provider(pid)
     
-    # ----- Subscription Expiry -----
+    # Subscription Expiry
     subscription_expiry = provider['subscription_expiry'] if provider and provider['subscription_expiry'] else None
     is_expired = False
     days_until_expiry = 0
@@ -3596,7 +3596,7 @@ def billing():
         days_until_expiry = (expiry_date.date() - today).days
         is_expired = days_until_expiry < 0
     
-    # ----- Calculate 5% Fee (current month) -----
+    # Calculate platform fee (use provider's percent_fee)
     today = date.today()
     month_start = today.replace(day=1).isoformat()
     total_revenue = db.execute(
@@ -3605,15 +3605,14 @@ def billing():
         (pid, month_start)
     ).fetchone()['total']
     
-    five_percent_fee = int(total_revenue * 0.05)  # 5% platform fee
+    percent = provider['percent_fee'] if provider and provider['percent_fee'] is not None else 5.0
+    platform_fee = int(total_revenue * (percent / 100))
     
-    # ----- Maintenance fee (default 20,000 UGX) -----
+    # Maintenance fee
     monthly_fee = provider['monthly_fee_ugx'] if provider and provider['monthly_fee_ugx'] else 20000
+    total_due = platform_fee + monthly_fee
     
-    # ----- Total due -----
-    total_due = five_percent_fee + monthly_fee
-    
-    # ----- Generate dynamic invoice number -----
+    # Generate dynamic invoice number
     current_year_month = datetime.now().strftime('%Y%m')
     count_invoices = db.execute(
         "SELECT COUNT(*) as cnt FROM invoices "
@@ -3623,7 +3622,7 @@ def billing():
     next_sequence = count_invoices + 1
     invoice_number = f"INV-{current_year_month}-{next_sequence:03d}"
     
-    # ----- Payment history -----
+    # Payment history
     payments = db.execute(
         "SELECT amount, created_at, status, transaction_id, voucher_code FROM voucher_requests "
         "WHERE provider_id = ? AND phone_number = 'manual' AND status = 'approved' "
@@ -3631,7 +3630,6 @@ def billing():
         (pid,)
     ).fetchall()
     
-    # Build payment rows
     payment_rows = ''
     if payments:
         for p in payments:
@@ -3659,7 +3657,7 @@ def billing():
     else:
         expiry_display = "Not set"
     
-    # ----- Check if payment is available (within 5 days of expiry) -----
+    # Check if payment is available (within 5 days of expiry)
     can_pay = days_until_expiry <= 5 and days_until_expiry >= 0
     payment_available_message = ''
     if can_pay:
@@ -3683,7 +3681,7 @@ def billing():
         </div>
         '''
     
-    # ----- Invoice Modal -----
+    # Invoice Modal
     invoice_modal = f'''
     <div id="invoiceModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:99999; overflow-y:auto; padding:40px 20px;">
         <div style="max-width:800px; margin:0 auto; background:var(--card-bg); border-radius:var(--radius); padding:40px; box-shadow:var(--shadow); border:1px solid var(--glass-border); position:relative;">
@@ -3724,10 +3722,10 @@ def billing():
                 </thead>
                 <tbody>
                     <tr>
-                        <td style="padding:12px; border-bottom:1px solid var(--border);">Platform Fee (5% of monthly revenue)</td>
-                        <td style="padding:12px; text-align:right; border-bottom:1px solid var(--border);">UGX {five_percent_fee:,}</td>
+                        <td style="padding:12px; border-bottom:1px solid var(--border);">Platform Fee ({percent}% of monthly revenue)</td>
+                        <td style="padding:12px; text-align:right; border-bottom:1px solid var(--border);">UGX {platform_fee:,}</td>
                         <td style="padding:12px; text-align:center; border-bottom:1px solid var(--border);">1</td>
-                        <td style="padding:12px; text-align:right; border-bottom:1px solid var(--border);">UGX {five_percent_fee:,}</td>
+                        <td style="padding:12px; text-align:right; border-bottom:1px solid var(--border);">UGX {platform_fee:,}</td>
                     </tr>
                     <tr>
                         <td style="padding:12px; border-bottom:1px solid var(--border);">Monthly Maintenance Fee</td>
@@ -3739,7 +3737,7 @@ def billing():
                 <tfoot>
                     <tr>
                         <td colspan="3" style="padding:12px; text-align:right; font-weight:600; border-top:2px solid var(--border);">Service Subtotal:</td>
-                        <td style="padding:12px; text-align:right; font-weight:600; border-top:2px solid var(--border);">UGX {(five_percent_fee + monthly_fee):,}</td>
+                        <td style="padding:12px; text-align:right; font-weight:600; border-top:2px solid var(--border);">UGX {total_due:,}</td>
                     </tr>
                     <tr>
                         <td colspan="3" style="padding:12px; text-align:right; font-weight:700; font-size:1.1rem; border-top:2px solid var(--border);">Total Due:</td>
@@ -3748,7 +3746,6 @@ def billing():
                 </tfoot>
             </table>
             
-            <!-- Payment Availability Message -->
             {payment_available_message}
             
             <div style="text-align:center; padding:20px 0; border-top:1px solid var(--border); margin-top:20px;">
@@ -3769,7 +3766,7 @@ def billing():
     </div>
     '''
     
-    # ----- Main content -----
+    # Main content
     content = f'''
     <div class="card">
         <div class="card-header">
@@ -4061,20 +4058,22 @@ def edit_provider_admin(pid):
             mtn = request.form.get('mtn', '')
             airtel = request.form.get('airtel', '')
             support = request.form.get('support', '')
-            new_password = request.form.get('password', '')
-
-            # Handle empty string values for numeric fields
-            percent_fee_str = request.form.get('percent_fee', '')
-            if percent_fee_str.strip() == '':
+            
+            # Handle percent_fee: if empty string, use existing or default 5.0
+            percent_fee_str = request.form.get('percent_fee', '').strip()
+            if percent_fee_str == '':
                 percent_fee = prov['percent_fee'] if prov['percent_fee'] is not None else 5.0
             else:
                 percent_fee = float(percent_fee_str)
-
-            monthly_fee_str = request.form.get('monthly_fee', '')
-            if monthly_fee_str.strip() == '':
+            
+            # Handle monthly_fee: if empty string, use existing or default 20000
+            monthly_fee_str = request.form.get('monthly_fee', '').strip()
+            if monthly_fee_str == '':
                 monthly_fee = prov['monthly_fee_ugx'] if prov['monthly_fee_ugx'] is not None else 20000
             else:
                 monthly_fee = int(monthly_fee_str)
+            
+            new_password = request.form.get('password', '')
 
             db.execute("""
                 UPDATE providers SET
@@ -4096,7 +4095,7 @@ def edit_provider_admin(pid):
             traceback.print_exc()
             return f"Error updating provider: {str(e)}", 500
     
-    # GET – show form
+    # GET – show form with current values
     percent_fee = prov['percent_fee'] if prov['percent_fee'] is not None else 5.0
     monthly_fee = prov['monthly_fee_ugx'] if prov['monthly_fee_ugx'] is not None else 20000
     
