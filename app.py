@@ -3605,12 +3605,13 @@ def billing():
         (pid, month_start)
     ).fetchone()['total']
     
+    # FIXED: Use bracket access with is not None checks
     percent = provider['percent_fee'] if provider and provider['percent_fee'] is not None else 5.0
     platform_fee = int(total_revenue * (percent / 100))
     
-    # Maintenance fee
+    # FIXED: Use bracket access with is not None checks
     monthly_fee = provider['monthly_fee_ugx'] if provider and provider['monthly_fee_ugx'] is not None else 20000
-    percent = provider['percent_fee'] if provider and provider['percent_fee'] is not None else 5.0
+    total_due = platform_fee + monthly_fee
     
     # Generate dynamic invoice number
     current_year_month = datetime.now().strftime('%Y%m')
@@ -3833,7 +3834,6 @@ def billing():
     '''
     
     return render_page("Billing & Subscription", content, get_pending_count(pid), pid, admin=True)
-
 # ============================================================
 # SUPER ADMIN
 # ============================================================
