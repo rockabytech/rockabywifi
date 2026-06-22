@@ -1141,7 +1141,7 @@ def home():
     # Get the selected theme
     theme = get_setting(pid, 'captive_portal_theme', 'default')
 
-    # Theme styles (same as before)
+    # Theme styles
     theme_styles = {
         'default': '',
         'neon': '''
@@ -1183,16 +1183,14 @@ def home():
         .voucher-code { background: #2c3e50; }
         '''
     }
-
     theme_css = theme_styles.get(theme, '')
 
-    # ----- Build the page -----
+    # Build the page
     bn = p['business_name'] if p else 'RockabyWiFi'
     logo = f'<img src="/static/uploads/{p["logo_image"]}" class="provider-logo" alt="{bn}">' if p and p['logo_image'] else ''
     poster = f'<img src="/static/uploads/{p["poster_image"]}" class="provider-poster" alt="Poster">' if p and p['poster_image'] else ''
     hero_logo = '<img src="/static/ug-06.png" alt="RockabyWiFi" style="height:80px; width:80px; border-radius:16px; object-fit:cover; margin-bottom:15px; box-shadow:0 4px 15px rgba(0,0,0,0.2);">'
 
-    # ----- Fetch active public packages -----
     db = get_db()
     plans = db.execute(
         "SELECT id, name, duration_minutes, price_ugx, speed_down, speed_up "
@@ -1201,7 +1199,6 @@ def home():
         (pid,)
     ).fetchall()
 
-    # ----- Build package cards -----
     package_cards = ''
     if plans:
         for plan in plans:
@@ -1220,23 +1217,15 @@ def home():
     else:
         package_cards = '<p style="grid-column:1/-1; text-align:center;">No packages available at the moment.</p>'
 
-    # ----- Assemble content -----
     content = f'''
-    <!-- Brand & Poster -->
     <div class="card" style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">{logo}<h2 style="margin:0;">{bn}</h2></div>
     {poster}
-
-    <!-- Hero -->
     <div class="hero" style="background: linear-gradient(135deg, rgba(26,115,232,0.15), rgba(99,102,241,0.1)); border-radius:var(--radius); padding:40px; text-align:center; margin-bottom:30px; border:1px solid var(--glass-border);">
         {hero_logo}
         <h1 style="font-size:2.5rem; margin-bottom:15px; background:linear-gradient(135deg, var(--primary), #6366f1); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Fast & Reliable WiFi</h1>
         <p style="font-size:1.1rem; color:var(--text-secondary); margin-bottom:20px;">Choose a plan below and get connected in minutes.</p>
     </div>
-
-    <!-- Cards Grid: Login, Redeem, and Packages -->
     <div class="card-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:20px; margin-bottom:30px;">
-
-        <!-- Login Card -->
         <div class="card package-card" style="text-align:center; display:flex; flex-direction:column; justify-content:space-between;">
             <div>
                 <h3 style="margin-bottom:10px;">🔐 Login</h3>
@@ -1244,8 +1233,6 @@ def home():
             </div>
             <a href="/subscriber-login?pid={pid}" class="btn" style="margin-top:15px; width:100%;">Login</a>
         </div>
-
-        <!-- Redeem Card -->
         <div class="card package-card" style="text-align:center; display:flex; flex-direction:column; justify-content:space-between;">
             <div>
                 <h3 style="margin-bottom:10px;">🎟️ Redeem Voucher</h3>
@@ -1253,42 +1240,48 @@ def home():
             </div>
             <a href="/redeem?pid={pid}" class="btn" style="margin-top:15px; width:100%;">Redeem</a>
         </div>
-
-        <!-- Package Cards -->
         {package_cards}
     </div>
-
-    <!-- Free Trial Link -->
     <p style="text-align:center; margin-top:10px;">
         <a href="/free-trial?pid={pid}" class="btn btn-outline" style="background: linear-gradient(135deg, #28a745, #51cf66); color:white; border:none; padding:12px 30px;">🎁 Try 5 Minutes Free</a>
     </p>
     '''
-
     return render_page("Get Internet Access", content, get_pending_count(pid), pid, admin=False, theme_style=theme_css)
+
 
 @app.route('/free-trial')
 def free_trial():
     pid = request.args.get('pid', 1, type=int)
-    ip = request.remote_addr; db = get_db()
-    if db.execute("SELECT COUNT(*) as cnt FROM trial_used WHERE ip_address=? AND provider_id=?",(ip,pid)).fetchone()['cnt'] > 0:
-        return render_page("Free Trial",'<div class="card"><div class="alert alert-error">You have already used your free trial.</div><p><a href="/?pid='+str(pid)+'" class="btn">Back to Home</a></p></div>', get_pending_count(pid), pid, admin=False)
-    trial = db.execute("SELECT id, duration_minutes FROM plans WHERE provider_id=? AND name='Free Trial' AND is_active=1",(pid,)).fetchone()
-    if not trial: return render_page("Free Trial",'<div class="card"><div class="alert alert-error">Trial not available.</div></div>', get_pending_count(pid), pid, admin=False)
+    ip = request.remote_addr
+    db = get_db()
+    if db.execute("SELECT COUNT(*) as cnt FROM trial_used WHERE ip_address=? AND provider_id=?", (ip, pid)).fetchone()['cnt'] > 0:
+        return render_page("Free Trial", '<div class="card"><div class="alert alert-error">You have already used your free trial.</div><p><a href="/?pid=' + str(pid) + '" class="btn">Back to Home</a></p></div>', get_pending_count(pid), pid, admin=False)
+    trial = db.execute("SELECT id, duration_minutes FROM plans WHERE provider_id=? AND name='Free Trial' AND is_active=1", (pid,)).fetchone()
+    if not trial:
+        return render_page("Free Trial", '<div class="card"><div class="alert alert-error">Trial not available.</div></div>', get_pending_count(pid), pid, admin=False)
     code = generate_voucher_code()
-    db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, ip_address, used) VALUES (?, ?, ?, 'trial', ?, 0)",(pid, code, trial['id'], ip))
-    db.execute("INSERT INTO trial_used (ip_address) VALUES (?)",(ip,)); db.commit()
+    db.execute("INSERT INTO vouchers (provider_id, code, plan_id, payment_method, ip_address, used) VALUES (?, ?, ?, 'trial', ?, 0)", (pid, code, trial['id'], ip))
+    db.execute("INSERT INTO trial_used (ip_address) VALUES (?)", (ip,))
+    db.commit()
     content = f'''<div class="card"><div class="alert alert-success">Free trial activated!</div><p><strong>Your Voucher Code:</strong></p><div class="voucher-code" id="vc">{code}</div><button class="copy-btn" onclick="navigator.clipboard.writeText('{code}')">📋 Copy</button><p style="margin-top:10px;">Use this code on the <a href="/redeem?pid={pid}">Redeem page</a> to connect for 5 minutes.</p><a href="/?pid={pid}" class="btn">Back to Home</a></div>'''
     return render_page("Free Trial", content, get_pending_count(pid), pid, admin=False)
+
 
 @app.route('/redeem', methods=['GET','POST'])
 def redeem():
     pid = request.args.get('pid', 1, type=int)
     if request.method == 'POST':
-        code = request.form['code'].strip().upper(); db = get_db()
-        v = db.execute("SELECT v.id, v.phone_number, p.duration_minutes FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.code=? AND v.used=0 AND v.provider_id=?",(code,pid)).fetchone()
-        if v: db.execute("UPDATE vouchers SET used=1, used_at=CURRENT_TIMESTAMP WHERE id=?",(v['id'],)); db.commit(); mt_add_user(v['phone_number'] or 'trial', v['duration_minutes']); return render_page("Voucher Redeemed",'<div class="card"><div class="alert alert-success">Connected! Enjoy your internet access.</div><a href="/?pid='+str(pid)+'" class="btn">Back to Home</a></div>', get_pending_count(pid), pid, admin=False)
-        return render_page("Redeem Voucher",'<div class="card"><div class="alert alert-error">Invalid or already used voucher code.</div><form method="POST"><input type="hidden" name="pid" value="'+str(pid)+'"><label>Enter Voucher Code</label><input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required><button type="submit" class="btn" style="margin-top:15px;width:100%;">Redeem</button></form></div>', get_pending_count(pid), pid, admin=False)
-    return render_page("Redeem Voucher",f'<div class="card"><div class="card-header">Redeem Voucher</div><form method="POST"><input type="hidden" name="pid" value="{pid}"><label>Enter Voucher Code</label><input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required><button type="submit" class="btn" style="margin-top:15px;width:100%;">Redeem</button></form></div>', get_pending_count(pid), pid, admin=False)
+        code = request.form['code'].strip().upper()
+        db = get_db()
+        v = db.execute("SELECT v.id, v.phone_number, p.duration_minutes FROM vouchers v JOIN plans p ON v.plan_id=p.id WHERE v.code=? AND v.used=0 AND v.provider_id=?", (code, pid)).fetchone()
+        if v:
+            db.execute("UPDATE vouchers SET used=1, used_at=CURRENT_TIMESTAMP WHERE id=?", (v['id'],))
+            db.commit()
+            mt_add_user(v['phone_number'] or 'trial', v['duration_minutes'])
+            return render_page("Voucher Redeemed", '<div class="card"><div class="alert alert-success">Connected! Enjoy your internet access.</div><a href="/?pid=' + str(pid) + '" class="btn">Back to Home</a></div>', get_pending_count(pid), pid, admin=False)
+        return render_page("Redeem Voucher", '<div class="card"><div class="alert alert-error">Invalid or already used voucher code.</div><form method="POST"><input type="hidden" name="pid" value="' + str(pid) + '"><label>Enter Voucher Code</label><input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required><button type="submit" class="btn" style="margin-top:15px;width:100%;">Redeem</button></form></div>', get_pending_count(pid), pid, admin=False)
+    return render_page("Redeem Voucher", f'<div class="card"><div class="card-header">Redeem Voucher</div><form method="POST"><input type="hidden" name="pid" value="{pid}"><label>Enter Voucher Code</label><input type="text" name="code" placeholder="WIFI-XXXX-XXXX-XXXX" required><button type="submit" class="btn" style="margin-top:15px;width:100%;">Redeem</button></form></div>', get_pending_count(pid), pid, admin=False)
+
 
 @app.route('/sms-verify', methods=['GET','POST'])
 def sms_verify():
@@ -1303,8 +1296,6 @@ def sms_verify():
 
     provider = get_provider(pid)
     active_method = get_setting(pid, 'active_payment_method', 'manual')
-
-    # ---- GET THE PAYMENT NAME (from settings or fallback to business name) ----
     display_name = get_setting(pid, 'payment_name', provider['business_name'] if provider else 'RockabyWiFi')
 
     # ---- POST: only for manual SMS verification ----
@@ -1343,7 +1334,6 @@ def sms_verify():
                     err = "Payment not sent to the correct provider number."
 
         if err:
-            # Show the form again with the error
             content = f'''
             <div class="card">
                 <div class="alert alert-error">{err}</div>
@@ -1359,7 +1349,7 @@ def sms_verify():
             '''
             return render_page("Verify Payment", content, pc, pid, admin=False)
 
-        # Check duplicate transaction
+        # Check duplicate
         if db.execute(
             "SELECT COUNT(*) as cnt FROM voucher_requests WHERE transaction_id=? AND provider_id=?",
             (parsed['tid'], pid)
@@ -1393,7 +1383,6 @@ def sms_verify():
             db.commit()
             # Activate internet immediately
             mt_add_user(phone, plan['duration_minutes'])
-            # Redirect to Google (or your success page)
             return redirect("https://www.google.com")
 
         else:
@@ -1420,7 +1409,7 @@ def sms_verify():
             <p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p>
             <p><strong>Pay to:</strong></p>
             <p>MTN: {provider["mtn_number"] if provider and provider["mtn_number"] else 'N/A'} | Airtel: {provider["airtel_number"] if provider and provider["airtel_number"] else 'N/A'}</p>
-            <p style="color:#666;">Name: {display_name}</p>   <!-- payment name displayed here -->
+            <p style="color:#666;">Name: {display_name}</p>
             <hr>
             <p style="margin-top:15px;"><strong>After payment, paste the full SMS below:</strong></p>
             <form method="POST">
@@ -1477,7 +1466,7 @@ def sms_verify():
             <p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p>
             <p><strong>Pay to:</strong></p>
             <p>MTN: {provider["mtn_number"] if provider and provider["mtn_number"] else 'N/A'} | Airtel: {provider["airtel_number"] if provider and provider["airtel_number"] else 'N/A'}</p>
-            <p style="color:#666;">Name: {display_name}</p>   <!-- payment name displayed here -->
+            <p style="color:#666;">Name: {display_name}</p>
             <hr>
             <p style="margin-top:15px;"><strong>After payment, paste the full SMS below:</strong></p>
             <form method="POST">
@@ -1492,128 +1481,80 @@ def sms_verify():
         '''
         return render_page("Verify Payment", content, pc, pid, admin=False)
 
-    elif active_method == 'yo':
-        if not provider['yo_username'] or not provider['yo_password']:
-            return render_page(
-                "Payment Error",
-                '<div class="card"><div class="alert alert-error">Yo! Payments is not configured. Please contact the provider.</div></div>',
-                pc, pid, admin=False
-            )
-        if phone:
-            return redirect(url_for('yo_pay', pid=pid, phone=phone, plan_id=plan_id))
-        else:
-            content = f'''
-            <div class="card">
-                <div class="card-header">Pay with Yo! Payments</div>
-                <p>You are about to purchase <strong>{plan["name"]}</strong> for UGX {plan["price_ugx"]:,}.</p>
-                <form method="GET" action="/yo-pay">
-                    <input type="hidden" name="pid" value="{pid}">
-                    <input type="hidden" name="plan_id" value="{plan_id}">
-                    <label>Your Phone Number *</label>
-                    <input type="tel" name="phone" required>
-                    <button type="submit" class="btn" style="margin-top:20px;width:100%;">Pay Now</button>
-                </form>
-            </div>
-            '''
-            return render_page("Yo! Payment", content, pc, pid, admin=False)
-
-    elif active_method == 'iotec':
-        return redirect(url_for('pay_iotec', pid=pid, plan_id=plan_id, phone=phone))
-
-    elif active_method == 'pawapay':
-        return redirect(url_for('pay_pawapay', pid=pid, plan_id=plan_id, phone=phone))
-
-    elif active_method == 'pesapal':
-        return redirect(url_for('pay_pesapal', pid=pid, plan_id=plan_id, phone=phone))
-
-    else:
-        # Fallback to manual
-        content = f'''
-        <div class="card">
-            <div class="card-header">Pay for Internet</div>
-            <p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p>
-            <p><strong>Pay to:</strong></p>
-            <p>MTN: {provider["mtn_number"] if provider and provider["mtn_number"] else 'N/A'} | Airtel: {provider["airtel_number"] if provider and provider["airtel_number"] else 'N/A'}</p>
-            <p style="color:#666;">Name: {provider["business_name"] if provider else "RockabyWiFi"}</p>
-            <hr>
-            <p style="margin-top:15px;"><strong>After payment, paste the full SMS below:</strong></p>
-            <form method="POST">
-                <input type="hidden" name="phone" value="{phone}">
-                <input type="hidden" name="plan_id" value="{plan_id}">
-                <input type="hidden" name="pid" value="{pid}">
-                <label>Paste Full MTN/Airtel SMS Here</label>
-                <textarea name="raw_sms" rows="6" required></textarea>
-                <button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button>
-            </form>
-        </div>
-        '''
-        return render_page("Verify Payment", content, pc, pid, admin=False)
 
 @app.route('/yo-pay')
 def yo_pay():
     pid = request.args.get('pid', 1, type=int)
-    phone = request.args.get('phone',''); plan_id = request.args.get('plan_id','1')
-    db = get_db(); plan = db.execute("SELECT * FROM plans WHERE id=? AND provider_id=?",(plan_id,pid)).fetchone()
-    if not plan: return "Invalid plan.", 400
-    provider = get_provider(pid); result = yo_charge(phone, plan['price_ugx'], plan['name'], provider)
-    if result == 'instant_success': return redirect("https://google.com")
-    if result: return redirect(result)
-    return render_page("Payment Error",f'<div class="card"><div class="alert alert-error">Automatic payment is unavailable. Please use manual payment.</div><p><a href="/sms-verify?phone={phone}&plan_id={plan_id}&pid={pid}" class="btn">Manual Payment</a></p></div>', get_pending_count(pid), pid, admin=False)
+    phone = request.args.get('phone', '')
+    plan_id = request.args.get('plan_id', '1')
+    db = get_db()
+    plan = db.execute("SELECT * FROM plans WHERE id=? AND provider_id=?", (plan_id, pid)).fetchone()
+    if not plan:
+        return "Invalid plan.", 400
+    provider = get_provider(pid)
+    result = yo_charge(phone, plan['price_ugx'], plan['name'], provider)
+    if result == 'instant_success':
+        return redirect("https://www.google.com")
+    if result:
+        return redirect(result)
+    return render_page("Payment Error", f'<div class="card"><div class="alert alert-error">Automatic payment is unavailable. Please use manual payment.</div><p><a href="/sms-verify?phone={phone}&plan_id={plan_id}&pid={pid}" class="btn">Manual Payment</a></p></div>', get_pending_count(pid), pid, admin=False)
+
 
 @app.route('/yo-callback', methods=['POST'])
 def yo_callback():
     data = request.get_json()
     if data and data.get('transaction_status') == 'SUCCEEDED':
-        tx_ref = data.get('external_ref'); db = get_db()
-        tx = db.execute("SELECT * FROM yo_tx WHERE tx_ref=? AND status='pending'",(tx_ref,)).fetchone()
+        tx_ref = data.get('external_ref')
+        db = get_db()
+        tx = db.execute("SELECT * FROM yo_tx WHERE tx_ref=? AND status='pending'", (tx_ref,)).fetchone()
         if tx:
-            plan = db.execute("SELECT id, duration_minutes FROM plans WHERE provider_id=? AND price_ugx=? AND is_active=1 LIMIT 1",(tx['provider_id'], tx['amount'])).fetchone()
+            plan = db.execute("SELECT id, duration_minutes FROM plans WHERE provider_id=? AND price_ugx=? AND is_active=1 LIMIT 1", (tx['provider_id'], tx['amount'])).fetchone()
             if plan:
                 code = generate_voucher_code()
-                db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used,used_at) VALUES (?,?,?,'yo',?,1,CURRENT_TIMESTAMP)",(tx['provider_id'],code,plan['id'],tx['phone']))
-                db.execute("UPDATE yo_tx SET status='completed', voucher_code=? WHERE tx_ref=?",(code, tx_ref)); db.commit(); mt_add_user(tx['phone'], plan['duration_minutes'])
+                db.execute("INSERT INTO vouchers (provider_id,code,plan_id,payment_method,phone_number,used,used_at) VALUES (?,?,?,'yo',?,1,CURRENT_TIMESTAMP)", (tx['provider_id'], code, plan['id'], tx['phone']))
+                db.execute("UPDATE yo_tx SET status='completed', voucher_code=? WHERE tx_ref=?", (code, tx_ref))
+                db.commit()
+                mt_add_user(tx['phone'], plan['duration_minutes'])
     return 'OK', 200
 
-@app.route('/iotec-callback', methods=['POST'])
-def iotec_callback():
-    # IOTEC will send payment confirmation here
-    # For now, just log and return OK
-    print("IOTEC callback received")
-    return 'OK', 200
-
-@app.route('/pawapay-callback', methods=['POST'])
-def pawapay_callback():
-    print("PawaPay callback received")
-    return 'OK', 200
-
-@app.route('/pesapal-callback', methods=['POST'])
-def pesapal_callback():
-    print("PesaPal callback received")
-    return 'OK', 200
 
 @app.route('/subscriber-login', methods=['GET','POST'])
 def subscriber_login():
     pid = request.args.get('pid', 1, type=int)
     if request.method == 'POST':
-        u = request.form['username'].strip(); pw = request.form['password']; db = get_db()
-        sub = db.execute("SELECT id, password_hash, suspended FROM subscribers WHERE username=? AND provider_id=?",(u,pid)).fetchone()
-        if sub and check_password_hash(sub['password_hash'],pw) and not sub['suspended']:
-            db.execute("DELETE FROM sessions WHERE subscriber_id=?",(sub['id'],)); ip = request.remote_addr
-            db.execute("INSERT INTO sessions (subscriber_id, provider_id, ip_address) VALUES (?,?,?)",(sub['id'],pid,ip))
-            db.execute("UPDATE subscribers SET current_ip=? WHERE id=?",(ip,sub['id'])); db.commit()
-            session['subscriber_id']=sub['id']; session['subscriber_name']=u; return redirect(url_for('subscriber_portal'))
-        return render_page("Subscriber Login",'<div class="card"><div class="alert alert-error">Invalid credentials or account suspended.</div><a href="/subscriber-login?pid='+str(pid)+'" class="btn">Try again</a></div>', get_pending_count(pid), pid, admin=False)
-    return render_page("Subscriber Login",f'<div class="card"><div class="card-header">Subscriber Login</div><form method="POST"><input type="hidden" name="pid" value="{pid}"><label>Username</label><input type="text" name="username" required><label>Password</label><input type="password" name="password" required><button type="submit" class="btn" style="margin-top:20px;">Login</button></form></div>', get_pending_count(pid), pid, admin=False)
+        u = request.form['username'].strip()
+        pw = request.form['password']
+        db = get_db()
+        sub = db.execute("SELECT id, password_hash, suspended FROM subscribers WHERE username=? AND provider_id=?", (u, pid)).fetchone()
+        if sub and check_password_hash(sub['password_hash'], pw) and not sub['suspended']:
+            db.execute("DELETE FROM sessions WHERE subscriber_id=?", (sub['id'],))
+            ip = request.remote_addr
+            db.execute("INSERT INTO sessions (subscriber_id, provider_id, ip_address) VALUES (?,?,?)", (sub['id'], pid, ip))
+            db.execute("UPDATE subscribers SET current_ip=? WHERE id=?", (ip, sub['id']))
+            db.commit()
+            session['subscriber_id'] = sub['id']
+            session['subscriber_name'] = u
+            return redirect(url_for('subscriber_portal'))
+        return render_page("Subscriber Login", '<div class="card"><div class="alert alert-error">Invalid credentials or account suspended.</div><a href="/subscriber-login?pid=' + str(pid) + '" class="btn">Try again</a></div>', get_pending_count(pid), pid, admin=False)
+    return render_page("Subscriber Login", f'<div class="card"><div class="card-header">Subscriber Login</div><form method="POST"><input type="hidden" name="pid" value="{pid}"><label>Username</label><input type="text" name="username" required><label>Password</label><input type="password" name="password" required><button type="submit" class="btn" style="margin-top:20px;">Login</button></form></div>', get_pending_count(pid), pid, admin=False)
+
 
 @app.route('/subscriber-portal')
 def subscriber_portal():
-    if 'subscriber_id' not in session: return redirect('/subscriber-login')
+    if 'subscriber_id' not in session:
+        return redirect('/subscriber-login')
     pid = session.get('provider_id', 1)
-    return render_page("Subscriber Portal",f'<div class="card"><h2>Welcome, {session["subscriber_name"]}</h2><p>You are connected. Your IP: {request.remote_addr}</p><a href="/subscriber-logout" class="btn btn-danger">Logout / Switch Device</a></div>', get_pending_count(pid), pid, admin=False)
+    return render_page("Subscriber Portal", f'<div class="card"><h2>Welcome, {session["subscriber_name"]}</h2><p>You are connected. Your IP: {request.remote_addr}</p><a href="/subscriber-logout" class="btn btn-danger">Logout / Switch Device</a></div>', get_pending_count(pid), pid, admin=False)
+
 
 @app.route('/subscriber-logout')
 def subscriber_logout():
-    if 'subscriber_id' in session: db = get_db(); db.execute("DELETE FROM sessions WHERE subscriber_id=?",(session['subscriber_id'],)); db.commit(); session.pop('subscriber_id',None); session.pop('subscriber_name',None)
+    if 'subscriber_id' in session:
+        db = get_db()
+        db.execute("DELETE FROM sessions WHERE subscriber_id=?", (session['subscriber_id'],))
+        db.commit()
+        session.pop('subscriber_id', None)
+        session.pop('subscriber_name', None)
     return redirect('/')
 
 # ------------------------------------------------------------
