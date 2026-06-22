@@ -3756,33 +3756,39 @@ def edit_provider_admin(pid):
         return redirect('/admin/dashboard')
     
     if request.method == 'POST':
-        # Safe extraction with defaults
-        business_name = request.form.get('business_name', prov['business_name'])
-        contact = request.form.get('contact', prov['contact'])
-        mtn = request.form.get('mtn', '')
-        airtel = request.form.get('airtel', '')
-        support = request.form.get('support', '')
-        percent_fee = float(request.form.get('percent_fee', prov.get('percent_fee', 5.0)))
-        monthly_fee = int(request.form.get('monthly_fee', prov.get('monthly_fee_ugx', 20000)))
-        new_password = request.form.get('password', '')
+        try:
+            # Safe extraction with defaults
+            business_name = request.form.get('business_name', prov['business_name'])
+            contact = request.form.get('contact', prov['contact'] or '')
+            mtn = request.form.get('mtn', '')
+            airtel = request.form.get('airtel', '')
+            support = request.form.get('support', '')
+            percent_fee = float(request.form.get('percent_fee', prov.get('percent_fee', 5.0)))
+            monthly_fee = int(request.form.get('monthly_fee', prov.get('monthly_fee_ugx', 20000)))
+            new_password = request.form.get('password', '')
 
-        db.execute("""
-            UPDATE providers SET
-                business_name=?, contact=?, mtn_number=?, airtel_number=?,
-                support_phone=?, percent_fee=?, monthly_fee_ugx=?
-            WHERE id=?
-        """, (business_name, contact, mtn, airtel, support, percent_fee, monthly_fee, pid))
-        
-        if new_password:
-            db.execute("UPDATE providers SET password_hash=? WHERE id=?",
-                       (generate_password_hash(new_password), pid))
-        
-        db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'edit_provider',?)",
-                   (f"Edited provider: {business_name}",))
-        db.commit()
-        return redirect('/admin/dashboard')
+            db.execute("""
+                UPDATE providers SET
+                    business_name=?, contact=?, mtn_number=?, airtel_number=?,
+                    support_phone=?, percent_fee=?, monthly_fee_ugx=?
+                WHERE id=?
+            """, (business_name, contact, mtn, airtel, support, percent_fee, monthly_fee, pid))
+            
+            if new_password:
+                db.execute("UPDATE providers SET password_hash=? WHERE id=?",
+                           (generate_password_hash(new_password), pid))
+            
+            db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'edit_provider',?)",
+                       (f"Edited provider: {business_name}",))
+            db.commit()
+            return redirect('/admin/dashboard')
+        except Exception as e:
+            # Print error to logs for debugging
+            import traceback
+            traceback.print_exc()
+            return f"Error updating provider: {str(e)}", 500
     
-    # GET – show form (safe defaults)
+    # GET – show form
     content = f'''
     <div class="card">
         <div class="card-header">Edit Provider: {prov["business_name"]}</div>
