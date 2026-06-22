@@ -3756,31 +3756,33 @@ def edit_provider_admin(pid):
         return redirect('/admin/dashboard')
     
     if request.method == 'POST':
+        # Safe extraction with defaults
+        business_name = request.form.get('business_name', prov['business_name'])
+        contact = request.form.get('contact', prov['contact'])
+        mtn = request.form.get('mtn', '')
+        airtel = request.form.get('airtel', '')
+        support = request.form.get('support', '')
+        percent_fee = float(request.form.get('percent_fee', prov.get('percent_fee', 5.0)))
+        monthly_fee = int(request.form.get('monthly_fee', prov.get('monthly_fee_ugx', 20000)))
+        new_password = request.form.get('password', '')
+
         db.execute("""
             UPDATE providers SET
                 business_name=?, contact=?, mtn_number=?, airtel_number=?,
                 support_phone=?, percent_fee=?, monthly_fee_ugx=?
             WHERE id=?
-        """, (
-            request.form['business_name'],
-            request.form['contact'],
-            request.form['mtn'],
-            request.form['airtel'],
-            request.form['support'],
-            float(request.form['percent_fee']),
-            int(request.form['monthly_fee']),
-            pid
-        ))
+        """, (business_name, contact, mtn, airtel, support, percent_fee, monthly_fee, pid))
         
-        if request.form.get('password'):
+        if new_password:
             db.execute("UPDATE providers SET password_hash=? WHERE id=?",
-                       (generate_password_hash(request.form['password']), pid))
+                       (generate_password_hash(new_password), pid))
         
         db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'edit_provider',?)",
-                   (f"Edited provider: {request.form['business_name']}",))
+                   (f"Edited provider: {business_name}",))
         db.commit()
         return redirect('/admin/dashboard')
     
+    # GET – show form (safe defaults)
     content = f'''
     <div class="card">
         <div class="card-header">Edit Provider: {prov["business_name"]}</div>
@@ -3800,10 +3802,10 @@ def edit_provider_admin(pid):
             <hr>
             <h4>Billing Settings</h4>
             <label>Platform Fee (%)</label>
-            <input type="number" name="percent_fee" step="0.1" value="{prov["percent_fee"]}" min="0" max="100">
+            <input type="number" name="percent_fee" step="0.1" value="{prov.get('percent_fee', 5.0)}" min="0" max="100">
             <small style="color:var(--text-secondary);">Percentage taken from each transaction</small>
             <label>Monthly Maintenance Fee (UGX)</label>
-            <input type="number" name="monthly_fee" value="{prov["monthly_fee_ugx"]}" step="1000" min="0">
+            <input type="number" name="monthly_fee" value="{prov.get('monthly_fee_ugx', 20000)}" step="1000" min="0">
             <small style="color:var(--text-secondary);">Fixed monthly fee charged to the provider</small>
             <button type="submit" class="btn" style="margin-top:20px;">Save Changes</button>
         </form>
