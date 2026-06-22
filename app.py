@@ -3161,6 +3161,265 @@ def refer():
 def docs():
     return render_page("Documentation", '<div class="card"><p>Documentation and help resources will be linked here.</p></div>', get_pending_count(session['provider_id']), session['provider_id'], admin=True)
 
+@app.route('/billing')
+@login_required
+def billing():
+    pid = session['provider_id']
+    db = get_db()
+    provider = get_provider(pid)
+    
+    # ----- Subscription Expiry -----
+    subscription_expiry = provider['subscription_expiry'] if provider and provider['subscription_expiry'] else None
+    is_expired = False
+    days_until_expiry = 0
+    
+    if subscription_expiry:
+        expiry_date = datetime.strptime(subscription_expiry, '%Y-%m-%d')
+        today = datetime.now().date()
+        days_until_expiry = (expiry_date.date() - today).days
+        is_expired = days_until_expiry < 0
+    
+    # ----- Calculate 5% Fee (current month) -----
+    today = date.today()
+    month_start = today.replace(day=1).isoformat()
+    total_revenue = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) as total FROM voucher_requests "
+        "WHERE provider_id = ? AND status = 'approved' AND date(created_at) >= ?",
+        (pid, month_start)
+    ).fetchone()['total']
+    
+    five_percent_fee = int(total_revenue * 0.05)  # 5% platform fee
+    
+    # ----- Maintenance fee (default 20,000 UGX) -----
+    monthly_fee = provider['monthly_fee_ugx'] if provider and provider['monthly_fee_ugx'] else 20000
+    
+    # ----- Total due -----
+    total_due = five_percent_fee + monthly_fee
+    
+    # ----- Generate dynamic invoice number -----
+    current_year_month = datetime.now().strftime('%Y%m')
+    count_invoices = db.execute(
+        "SELECT COUNT(*) as cnt FROM invoices "
+        "WHERE provider_id = ? AND invoice_no LIKE ?",
+        (pid, f'INV-{current_year_month}-%')
+    ).fetchone()['cnt']
+    next_sequence = count_invoices + 1
+    invoice_number = f"INV-{current_year_month}-{next_sequence:03d}"
+    
+    # ----- Payment history -----
+    payments = db.execute(
+        "SELECT amount, created_at, status, transaction_id, voucher_code FROM voucher_requests "
+        "WHERE provider_id = ? AND phone_number = 'manual' AND status = 'approved' "
+        "ORDER BY created_at DESC LIMIT 10",
+        (pid,)
+    ).fetchall()
+    
+    # Build payment rows
+    payment_rows = ''
+    if payments:
+        for p in payments:
+            payment_rows += f'''
+            <tr>
+                <td>UGX {p['amount']:,}</td>
+                <td>{p['created_at'][:16] if p['created_at'] else '-'}</td>
+                <td>{p['status']}</td>
+                <td>{p['voucher_code'] or '-'}</td>
+            </tr>
+            '''
+    else:
+        payment_rows = '''
+        <tr>
+            <td colspan="4" style="text-align:center; padding:30px; color:var(--text-secondary);">
+                No payments found. You have not made any payments through the system yet.
+            </td>
+        </tr>
+        '''
+    
+    # Format expiry date
+    if subscription_expiry:
+        expiry_display = datetime.strptime(subscription_expiry, '%Y-%m-%d').strftime('%d.%m.%Y')
+        expiry_display += " at 07:24 PM"
+    else:
+        expiry_display = "Not set"
+    
+    # ----- Check if payment is available (within 5 days of expiry) -----
+    can_pay = days_until_expiry <= 5 and days_until_expiry >= 0
+    payment_available_message = ''
+    if can_pay:
+        payment_available_message = f'''
+        <div style="background:rgba(40,167,69,0.1); border-left:4px solid #28a745; padding:20px; border-radius:4px; margin:20px 0;">
+            <h4 style="color:#28a745; margin:0 0 10px 0;">✅ Payment Available</h4>
+            <p style="margin:0; color:var(--text-secondary);">
+                Your subscription expires in {days_until_expiry} day(s). You can now renew your license.
+            </p>
+            <a href="#" class="btn" style="margin-top:10px;">Pay Now UGX {total_due:,}</a>
+        </div>
+        '''
+    else:
+        payment_available_message = f'''
+        <div style="background:rgba(255,193,7,0.1); border-left:4px solid #ffc107; padding:20px; border-radius:4px; margin:20px 0;">
+            <h4 style="color:#ffc107; margin:0 0 10px 0;">Payment Not Available</h4>
+            <p style="margin:0; color:var(--text-secondary);">
+                License renewal payments can only be made within 5 days of your subscription expiry date. 
+                Please check back in a few days to make a payment.
+            </p>
+        </div>
+        '''
+    
+    # ----- Invoice Modal -----
+    invoice_modal = f'''
+    <div id="invoiceModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:99999; overflow-y:auto; padding:40px 20px;">
+        <div style="max-width:800px; margin:0 auto; background:var(--card-bg); border-radius:var(--radius); padding:40px; box-shadow:var(--shadow); border:1px solid var(--glass-border); position:relative;">
+            <button onclick="closeInvoiceModal()" style="position:absolute; top:15px; right:20px; background:none; border:none; font-size:1.8rem; cursor:pointer; color:var(--text);">&times;</button>
+            
+            <div style="display:flex; justify-content:space-between; margin-bottom:30px;">
+                <div>
+                    <h2 style="font-size:1.8rem; margin:0; color:var(--primary);">INVOICE</h2>
+                    <p style="color:var(--text-secondary); margin:5px 0;">Invoice #{invoice_number}</p>
+                    <p style="color:var(--text-secondary); margin:5px 0;">Date: {datetime.now().strftime('%d %B %Y')}</p>
+                </div>
+                <div style="text-align:right;">
+                    <p style="font-weight:600; margin:0;">RockabyTech</p>
+                    <p style="color:var(--text-secondary); margin:2px 0;">support@rockabytech.com</p>
+                    <p style="color:var(--text-secondary); margin:0;">https://rockabytech.github.io/</p>
+                </div>
+            </div>
+            
+            <div style="margin-bottom:30px; padding:20px; background:var(--bg); border-radius:8px;">
+                <h3 style="margin:0 0 10px 0; font-size:1rem; color:var(--text-secondary);">Bill To</h3>
+                <p style="font-size:1.1rem; margin:0;"><strong>{provider["business_name"] if provider else "N/A"}</strong></p>
+                <p style="margin:2px 0; color:var(--text-secondary);">Phone: {provider["contact"] if provider else "N/A"}</p>
+                <p style="margin:2px 0; color:var(--text-secondary);">Email: {provider["support_phone"] if provider else "N/A"}</p>
+            </div>
+            
+            <div style="margin-bottom:30px;">
+                <p><strong>Status:</strong> <span style="color:#ffc107;">Pending</span></p>
+            </div>
+            
+            <table style="width:100%; border-collapse:collapse; margin-bottom:20px;">
+                <thead>
+                    <tr style="background:var(--bg);">
+                        <th style="padding:12px; text-align:left; border-bottom:2px solid var(--border);">Description</th>
+                        <th style="padding:12px; text-align:right; border-bottom:2px solid var(--border);">Price</th>
+                        <th style="padding:12px; text-align:center; border-bottom:2px solid var(--border);">Quantity</th>
+                        <th style="padding:12px; text-align:right; border-bottom:2px solid var(--border);">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="padding:12px; border-bottom:1px solid var(--border);">Platform Fee (5% of monthly revenue)</td>
+                        <td style="padding:12px; text-align:right; border-bottom:1px solid var(--border);">UGX {five_percent_fee:,}</td>
+                        <td style="padding:12px; text-align:center; border-bottom:1px solid var(--border);">1</td>
+                        <td style="padding:12px; text-align:right; border-bottom:1px solid var(--border);">UGX {five_percent_fee:,}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:12px; border-bottom:1px solid var(--border);">Monthly Maintenance Fee</td>
+                        <td style="padding:12px; text-align:right; border-bottom:1px solid var(--border);">UGX {monthly_fee:,}</td>
+                        <td style="padding:12px; text-align:center; border-bottom:1px solid var(--border);">1</td>
+                        <td style="padding:12px; text-align:right; border-bottom:1px solid var(--border);">UGX {monthly_fee:,}</td>
+                    </tr>
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="3" style="padding:12px; text-align:right; font-weight:600; border-top:2px solid var(--border);">Service Subtotal:</td>
+                        <td style="padding:12px; text-align:right; font-weight:600; border-top:2px solid var(--border);">UGX {(five_percent_fee + monthly_fee):,}</td>
+                    </tr>
+                    <tr>
+                        <td colspan="3" style="padding:12px; text-align:right; font-weight:700; font-size:1.1rem; border-top:2px solid var(--border);">Total Due:</td>
+                        <td style="padding:12px; text-align:right; font-weight:700; font-size:1.1rem; border-top:2px solid var(--border);">UGX {total_due:,}</td>
+                    </tr>
+                </tfoot>
+            </table>
+            
+            <!-- Payment Availability Message -->
+            {payment_available_message}
+            
+            <div style="text-align:center; padding:20px 0; border-top:1px solid var(--border); margin-top:20px;">
+                <p style="color:var(--text-secondary); margin:5px 0;">Thank you for your business!</p>
+                <p style="color:var(--text-secondary); margin:5px 0;">
+                    For billing inquiries, please contact 
+                    <a href="mailto:sales@rockabytech.com" style="color:var(--primary);">sales@rockabytech.com</a>
+                </p>
+                <p style="color:var(--text-secondary); margin:5px 0;">
+                    Access your account and manage your services by logging in at:
+                    <a href="{url_for('login', _external=True)}" style="color:var(--primary);">{url_for('login', _external=True)}</a>
+                </p>
+                <p style="color:var(--text-secondary); margin:10px 0 0 0; font-size:0.8rem;">
+                    &copy; 2026 RockabyTech. All rights reserved.
+                </p>
+            </div>
+        </div>
+    </div>
+    '''
+    
+    # ----- Main content -----
+    content = f'''
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-credit-card" style="color:var(--primary);"></i> 
+            RockabyWiFi Licence
+        </div>
+        <div style="padding:10px 0;">
+            <p style="font-size:1.1rem;">
+                Your subscription expires on <strong>{expiry_display}</strong>.
+                {'' if is_expired else f'<span style="color:var(--text-secondary);">Please renew your subscription before it expires.</span>'}
+            </p>
+            <a href="#" onclick="showInvoiceModal()" class="btn" style="margin-top:10px;">
+                <i class="fas fa-file-invoice"></i> View Invoice & Payment Details
+            </a>
+        </div>
+    </div>
+    
+    <!-- Payment History Table -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-history"></i> Payment History
+            <div style="display:flex; gap:10px;">
+                <input type="text" placeholder="Search..." style="width:200px; padding:6px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+                <button class="btn btn-small">Search</button>
+            </div>
+        </div>
+        <div class="table-responsive" style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Amount</th>
+                        <th>Payment Date</th>
+                        <th>Status</th>
+                        <th>Invoice</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {payment_rows}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    {invoice_modal}
+    
+    <script>
+        function showInvoiceModal() {{
+            document.getElementById('invoiceModal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }}
+        
+        function closeInvoiceModal() {{
+            document.getElementById('invoiceModal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }}
+        
+        window.onclick = function(event) {{
+            var modal = document.getElementById('invoiceModal');
+            if (event.target == modal) {{
+                closeInvoiceModal();
+            }}
+        }}
+    </script>
+    '''
+    
+    return render_page("Billing & Subscription", content, get_pending_count(pid), pid, admin=True)
+
 # ------------------------------------------------------------
 # SUPER ADMIN
 # ------------------------------------------------------------
