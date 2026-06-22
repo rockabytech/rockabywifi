@@ -3584,6 +3584,83 @@ def super_admin_dashboard():
     content = f'''<div class="stat-grid"><div class="stat-card"><h3>{total_providers}</h3><small>Total Providers</small></div><div class="stat-card"><h3>{active_providers}</h3><small>Active</small></div><div class="stat-card"><h3>UGX {total_revenue or 0:,}</h3><small>Total Revenue</small></div><div class="stat-card"><h3>UGX {platform_fee:,}</h3><small>Your 5% Fee</small></div><div class="stat-card"><h3>{total_users}</h3><small>End Users</small></div><div class="stat-card"><h3>{pending_approvals}</h3><small>Pending</small></div></div><div class="card"><div class="card-header">Today: UGX {today_revenue or 0:,} revenue | UGX {int(today_revenue * 0.05):,} your fee</div></div><div class="card"><div class="card-header">Provider Management <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a></div><div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;"><table><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>Status</th><th>Revenue</th><th>Total Fee</th><th>Fee/Mo</th><th>Vouchers</th><th>Expiry</th><th>Actions</th></tr></thead><tbody>{rows}</tbody></table></div></div><div class="card"><div class="card-header">🕒 Recent Activity</div><div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;"><table><thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead><tbody>{audit_rows}</tbody></table></div></div><p style="margin-top:20px;"><a href="/admin/logout" class="btn btn-outline">Logout</a></p>'''
     return render_page("Super Admin Dashboard", content, 0, admin=False)
 
+    @app.route('/admin/edit-provider/<int:pid>', methods=['GET', 'POST'])
+def edit_provider_admin(pid):
+    if not session.get('super_admin'):
+        return redirect('/admin')
+
+    db = get_db()
+    prov = db.execute("SELECT * FROM providers WHERE id=?", (pid,)).fetchone()
+    if not prov:
+        return redirect('/admin/dashboard')
+
+    if request.method == 'POST':
+        # Update basic info + billing settings
+        db.execute("""
+            UPDATE providers SET
+                business_name=?, contact=?, mtn_number=?, airtel_number=?,
+                support_phone=?, percent_fee=?, monthly_fee_ugx=?
+            WHERE id=?
+        """, (
+            request.form['business_name'],
+            request.form['contact'],
+            request.form['mtn'],
+            request.form['airtel'],
+            request.form['support'],
+            float(request.form['percent_fee']),
+            int(request.form['monthly_fee']),
+            pid
+        ))
+
+        # Update password if provided
+        if request.form.get('password'):
+            db.execute("UPDATE providers SET password_hash=? WHERE id=?",
+                       (generate_password_hash(request.form['password']), pid))
+
+        db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'edit_provider',?)",
+                   (f"Edited provider: {request.form['business_name']}",))
+        db.commit()
+        return redirect('/admin/dashboard')
+
+    # Build the edit form
+    content = f'''
+    <div class="card">
+        <div class="card-header">Edit Provider: {prov["business_name"]}</div>
+        <form method="POST">
+            <label>Business Name*</label>
+            <input type="text" name="business_name" value="{prov["business_name"]}" required>
+
+            <label>Contact Phone*</label>
+            <input type="tel" name="contact" value="{prov["contact"] or ""}" required>
+
+            <label>New Password (leave blank to keep current)</label>
+            <input type="password" name="password">
+
+            <label>MTN Number</label>
+            <input type="text" name="mtn" value="{prov["mtn_number"] or ""}">
+
+            <label>Airtel Number</label>
+            <input type="text" name="airtel" value="{prov["airtel_number"] or ""}">
+
+            <label>Support WhatsApp</label>
+            <input type="text" name="support" value="{prov["support_phone"] or ""}">
+
+            <hr>
+            <h4>Billing Settings</h4>
+            <label>Platform Fee (%)</label>
+            <input type="number" name="percent_fee" step="0.1" value="{prov["percent_fee"]}" min="0" max="100">
+            <small style="color:var(--text-secondary);">Percentage taken from each transaction (e.g., 5 for 5%)</small>
+
+            <label>Monthly Maintenance Fee (UGX)</label>
+            <input type="number" name="monthly_fee" value="{prov["monthly_fee_ugx"]}" step="1000" min="0">
+            <small style="color:var(--text-secondary);">Fixed monthly fee charged to the provider</small>
+
+            <button type="submit" class="btn" style="margin-top:20px;">Save Changes</button>
+        </form>
+    </div>
+    '''
+    return render_page("Edit Provider", content, 0, admin=False)
+
 @app.route('/admin/add-provider', methods=['GET', 'POST'])
 def add_provider():
     if not session.get('super_admin'):
