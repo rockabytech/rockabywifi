@@ -539,19 +539,110 @@ base_template = """
             font-weight: 600;
         }
         .install-btn:hover { transform: scale(1.05); }
-        @media (max-width:768px) {
-            .sidebar { transform:translateX(-100%); } .sidebar.open { transform:translateX(0); }
-            .main-content { margin-left:0; } .chart-row { flex-direction:column; }
-            .chart-row .card { min-width:100%; }
+
+        /* ===== MOBILE RESPONSIVENESS IMPROVEMENTS ===== */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 280px;
+                transform: translateX(-100%);
+            }
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            .main-content {
+                margin-left: 0 !important;
+            }
+            .card {
+                padding: 16px !important;
+                margin-bottom: 12px;
+            }
+            .card-header {
+                font-size: 1rem;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
             .stat-grid {
                 grid-template-columns: repeat(2, 1fr) !important;
                 gap: 10px !important;
             }
             .stat-card {
-                padding: 16px !important;
+                padding: 12px !important;
             }
             .stat-card h3 {
-                font-size: 1.5rem !important;
+                font-size: 1.2rem !important;
+            }
+            .stat-card small {
+                font-size: 0.7rem;
+            }
+            .chart-row {
+                flex-direction: column;
+            }
+            .chart-row .card {
+                min-width: 100% !important;
+            }
+            .table-responsive {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                margin: 0 -8px;
+                padding: 0 8px;
+            }
+            table {
+                font-size: 0.8rem;
+            }
+            th, td {
+                padding: 6px 8px !important;
+                white-space: nowrap;
+            }
+            .tabs {
+                gap: 5px;
+                overflow-x: auto;
+                flex-wrap: nowrap;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: 5px;
+            }
+            .tab {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+                white-space: nowrap;
+            }
+            input, textarea, select {
+                font-size: 0.9rem;
+                padding: 8px 10px;
+            }
+            .btn {
+                padding: 8px 16px;
+                font-size: 0.85rem;
+            }
+            .container {
+                padding: 0 12px;
+                margin: 12px auto;
+            }
+            #invoiceModal > div {
+                margin: 10px;
+                padding: 20px !important;
+            }
+            #invoiceModal table {
+                font-size: 0.8rem;
+            }
+            #invoiceModal th, #invoiceModal td {
+                padding: 6px 8px !important;
+            }
+            .card-header input[type="text"] {
+                width: 120px !important;
+                font-size: 0.8rem;
+            }
+            .topbar {
+                padding: 10px 12px !important;
+                flex-wrap: wrap;
+            }
+            .topbar-right {
+                gap: 10px;
+            }
+            .topbar-right span {
+                font-size: 0.85rem !important;
+            }
+            .hamburger {
+                font-size: 1.2rem;
             }
         }
         {theme_style}   <!-- THEME CSS INJECTED INSIDE THE STYLE BLOCK -->
@@ -609,6 +700,33 @@ base_template = """
                     .catch(err => console.log('Service Worker failed:', err));
             });
         }
+
+        // ===== MOBILE DROPDOWN TOGGLE (Touch-friendly 3‑dot menus) =====
+        document.addEventListener('DOMContentLoaded', function() {
+            if ('ontouchstart' in window) {
+                document.querySelectorAll('.dropdown').forEach(function(dropdown) {
+                    dropdown.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        var content = this.querySelector('.dropdown-content');
+                        if (content) {
+                            // Close all other dropdowns
+                            document.querySelectorAll('.dropdown-content').forEach(function(other) {
+                                if (other !== content) other.style.display = 'none';
+                            });
+                            content.style.display = content.style.display === 'block' ? 'none' : 'block';
+                        }
+                    });
+                });
+                // Close dropdowns when clicking outside
+                document.addEventListener('click', function(e) {
+                    if (!e.target.closest('.dropdown')) {
+                        document.querySelectorAll('.dropdown-content').forEach(function(el) {
+                            el.style.display = 'none';
+                        });
+                    }
+                });
+            }
+        });
     </script>
 </body>
 </html>
@@ -3465,6 +3583,247 @@ def super_admin_dashboard():
     audit_rows = ''.join(f'<tr><td>{a["created_at"][:16]}</td><td>{a["action"]}</td><td>{a["details"]}</td></tr>' for a in audit) or '<tr><td colspan="3">No activity yet.</td></tr>'
     content = f'''<div class="stat-grid"><div class="stat-card"><h3>{total_providers}</h3><small>Total Providers</small></div><div class="stat-card"><h3>{active_providers}</h3><small>Active</small></div><div class="stat-card"><h3>UGX {total_revenue or 0:,}</h3><small>Total Revenue</small></div><div class="stat-card"><h3>UGX {platform_fee:,}</h3><small>Your 5% Fee</small></div><div class="stat-card"><h3>{total_users}</h3><small>End Users</small></div><div class="stat-card"><h3>{pending_approvals}</h3><small>Pending</small></div></div><div class="card"><div class="card-header">Today: UGX {today_revenue or 0:,} revenue | UGX {int(today_revenue * 0.05):,} your fee</div></div><div class="card"><div class="card-header">Provider Management <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a></div><div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;"><table><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>Status</th><th>Revenue</th><th>Total Fee</th><th>Fee/Mo</th><th>Vouchers</th><th>Expiry</th><th>Actions</th></tr></thead><tbody>{rows}</tbody></table></div></div><div class="card"><div class="card-header">🕒 Recent Activity</div><div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;"><table><thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead><tbody>{audit_rows}</tbody></table></div></div><p style="margin-top:20px;"><a href="/admin/logout" class="btn btn-outline">Logout</a></p>'''
     return render_page("Super Admin Dashboard", content, 0, admin=False)
+
+@app.route('/admin/add-provider', methods=['GET', 'POST'])
+def add_provider():
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    
+    if request.method == 'POST':
+        db = get_db()
+        hashed = generate_password_hash(request.form['password'])
+        
+        # Insert provider with billing fields
+        db.execute("""
+            INSERT INTO providers (
+                business_name, contact, password_hash, subscription_expiry, is_active,
+                mtn_number, airtel_number, support_phone,
+                percent_fee, monthly_fee_ugx
+            ) VALUES (?,?,?,?,1,?,?,?,?,?)
+        """, (
+            request.form['business_name'],
+            request.form['contact'],
+            hashed,
+            request.form['expiry'],
+            request.form['mtn'],
+            request.form['airtel'],
+            request.form['support'],
+            float(request.form['percent_fee']),      # platform fee %
+            int(request.form['monthly_fee'])         # monthly maintenance fee
+        ))
+        
+        new_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        
+        # Create default plans for the new provider
+        default_plans = [
+            ('1 Hour', 60, 500),
+            ('3 Hours', 180, 1000),
+            ('24 Hours', 1440, 3000),
+            ('Weekly', 10080, 10000),
+            ('Monthly', 43200, 30000),
+        ]
+        for name, mins, price in default_plans:
+            db.execute("""
+                INSERT INTO plans (provider_id, name, duration_minutes, price_ugx, is_public, speed_down, speed_up)
+                VALUES (?,?,?,?,1,'5M','2M')
+            """, (new_id, name, mins, price))
+        
+        # Add free trial plan
+        db.execute("""
+            INSERT INTO plans (provider_id, name, duration_minutes, price_ugx, is_public, speed_down, speed_up)
+            VALUES (?, 'Free Trial', 5, 0, 0, '1M', '512k')
+        """, (new_id,))
+        
+        # Set default auto-approve
+        db.execute("INSERT INTO settings (provider_id, key, value) VALUES (?,'auto_approve','1')", (new_id,))
+        
+        db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'add_provider',?)",
+                   (f"Added provider: {request.form['business_name']}",))
+        db.commit()
+        return redirect('/admin/dashboard')
+    
+    # GET – show the add form with billing fields
+    content = '''
+    <div class="card">
+        <div class="card-header">Add New Provider</div>
+        <form method="POST">
+            <label>Business Name*</label>
+            <input type="text" name="business_name" required>
+            
+            <label>Contact Phone*</label>
+            <input type="tel" name="contact" required>
+            
+            <label>Login Password*</label>
+            <input type="password" name="password" required>
+            
+            <label>Subscription Expiry*</label>
+            <input type="date" name="expiry" required>
+            
+            <label>MTN Number</label>
+            <input type="text" name="mtn">
+            
+            <label>Airtel Number</label>
+            <input type="text" name="airtel">
+            
+            <label>Support WhatsApp</label>
+            <input type="text" name="support">
+            
+            <hr>
+            <h4>Billing Settings</h4>
+            <label>Platform Fee (%)</label>
+            <input type="number" name="percent_fee" step="0.1" value="5" min="0" max="100">
+            <small style="color:var(--text-secondary);">Percentage taken from each transaction (e.g., 5 for 5%)</small>
+            
+            <label>Monthly Maintenance Fee (UGX)</label>
+            <input type="number" name="monthly_fee" value="20000" step="1000" min="0">
+            <small style="color:var(--text-secondary);">Fixed monthly fee charged to the provider</small>
+            
+            <button type="submit" class="btn" style="margin-top:20px;">Create Provider</button>
+        </form>
+    </div>
+    '''
+    return render_page("Add Provider", content, 0, admin=False)
+
+@app.route('/admin/extend/<int:pid>', methods=['GET','POST'])
+def extend_subscription(pid):
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    db = get_db()
+    prov = db.execute("SELECT * FROM providers WHERE id=?", (pid,)).fetchone()
+    if not prov:
+        return redirect('/admin/dashboard')
+    if request.method == 'POST':
+        new_expiry = request.form['expiry']
+        db.execute("UPDATE providers SET subscription_expiry=?, is_active=1 WHERE id=?", (new_expiry, pid))
+        db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'extend_subscription',?)",
+                   (f"Extended {prov['business_name']} to {new_expiry}",))
+        db.commit()
+        return redirect('/admin/dashboard')
+    current = prov['subscription_expiry'] if prov['subscription_expiry'] else date.today().isoformat()
+    content = f'''
+    <div class="card">
+        <div class="card-header">Extend Subscription for {prov["business_name"]}</div>
+        <p>Current expiry: <strong>{current}</strong></p>
+        <form method="POST">
+            <label>New Expiry Date*</label>
+            <input type="date" name="expiry" value="{current}" required>
+            <div style="margin-top:10px;">
+                <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry]').value='{(date.today()+timedelta(days=30)).isoformat()}'">+1 Month</button>
+                <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry]').value='{(date.today()+timedelta(days=90)).isoformat()}'">+3 Months</button>
+                <button type="button" class="btn btn-small" onclick="document.querySelector('[name=expiry]').value='{(date.today()+timedelta(days=365)).isoformat()}'">+1 Year</button>
+            </div>
+            <button type="submit" class="btn" style="margin-top:20px;">Save</button>
+        </form>
+    </div>
+    '''
+    return render_page("Extend Subscription", content, 0, admin=False)
+
+@app.route('/admin/invoice/<int:pid>', methods=['GET','POST'])
+def admin_invoice(pid):
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    db = get_db()
+    prov = db.execute("SELECT * FROM providers WHERE id=?", (pid,)).fetchone()
+    if not prov:
+        return redirect('/admin/dashboard')
+    if request.method == 'POST':
+        inv_no = f"INV-{datetime.now().strftime('%Y%m')}-{random.randint(1000,9999)}"
+        db.execute("""
+            INSERT INTO invoices (provider_id, invoice_no, user_id, amount, status, due_date)
+            VALUES (?,?,?,?,'pending',?)
+        """, (pid, inv_no, request.form.get('user_id', 0), float(request.form['amount']), request.form['due_date']))
+        db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'send_invoice',?)",
+                   (f"Invoice {inv_no} for {prov['business_name']} - UGX {request.form['amount']}",))
+        db.commit()
+        return redirect('/admin/dashboard')
+    content = f'''
+    <div class="card">
+        <div class="card-header">Send Invoice to {prov["business_name"]}</div>
+        <form method="POST">
+            <label>Amount (UGX)*</label>
+            <input type="number" name="amount" step="0.01" required>
+            <label>Due Date</label>
+            <input type="date" name="due_date">
+            <button type="submit" class="btn" style="margin-top:20px;">Send Invoice</button>
+        </form>
+    </div>
+    '''
+    return render_page("Send Invoice", content, 0, admin=False)
+
+@app.route('/admin/message/<int:pid>', methods=['GET','POST'])
+def admin_message(pid):
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    db = get_db()
+    prov = db.execute("SELECT * FROM providers WHERE id=?", (pid,)).fetchone()
+    if not prov:
+        return redirect('/admin/dashboard')
+    if request.method == 'POST':
+        db.execute("INSERT INTO sms_log (provider_id, phone_number, message) VALUES (?,?,?)",
+                   (pid, prov['contact'], request.form['message']))
+        db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'send_message',?)",
+                   (f"Message to {prov['business_name']}: {request.form['message'][:50]}",))
+        db.commit()
+        return redirect('/admin/dashboard')
+    content = f'''
+    <div class="card">
+        <div class="card-header">Send Message to {prov["business_name"]} ({prov["contact"]})</div>
+        <form method="POST">
+            <label>Message*</label>
+            <textarea name="message" rows="4" required></textarea>
+            <button type="submit" class="btn" style="margin-top:20px;">Send</button>
+        </form>
+    </div>
+    '''
+    return render_page("Send Message", content, 0, admin=False)
+
+@app.route('/admin/impersonate/<int:pid>')
+def impersonate(pid):
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    db = get_db()
+    prov = db.execute("SELECT * FROM providers WHERE id=?", (pid,)).fetchone()
+    if prov:
+        session['provider_id'] = prov['id']
+        session['provider_name'] = prov['business_name']
+        db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'impersonate',?)",
+                   (f"Impersonated {prov['business_name']}",))
+        db.commit()
+        return redirect('/dashboard')
+    return redirect('/admin/dashboard')
+
+@app.route('/admin/toggle-provider/<int:pid>')
+def toggle_provider(pid):
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    db = get_db()
+    prov = db.execute("SELECT is_active, business_name FROM providers WHERE id=?", (pid,)).fetchone()
+    if prov:
+        new = 0 if prov['is_active'] else 1
+        db.execute("UPDATE providers SET is_active=? WHERE id=?", (new, pid))
+        db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'toggle_provider',?)",
+                   (f"{'Activated' if new else 'Suspended'} {prov['business_name']}",))
+        db.commit()
+    return redirect('/admin/dashboard')
+
+@app.route('/admin/delete-provider/<int:pid>')
+def delete_provider(pid):
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    if pid == 1:
+        return "Cannot delete the main admin provider.", 403
+    db = get_db()
+    prov = db.execute("SELECT business_name FROM providers WHERE id=?", (pid,)).fetchone()
+    db.execute("DELETE FROM providers WHERE id=?", (pid,))
+    db.execute("DELETE FROM plans WHERE provider_id=?", (pid,))
+    db.execute("DELETE FROM vouchers WHERE provider_id=?", (pid,))
+    db.execute("DELETE FROM voucher_requests WHERE provider_id=?", (pid,))
+    db.execute("DELETE FROM subscribers WHERE provider_id=?", (pid,))
+    db.execute("DELETE FROM settings WHERE provider_id=?", (pid,))
+    db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'delete_provider',?)",
+               (f"Deleted provider: {prov['business_name']}",))
+    db.commit()
+    return redirect('/admin/dashboard')
 
 # Keep all other super admin routes (add-provider, extend, edit-provider, invoice, message, impersonate, toggle-provider, delete-provider, logout) unchanged.
 
