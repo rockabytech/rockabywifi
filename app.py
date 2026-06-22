@@ -3293,8 +3293,8 @@ def settings():
         </div>
         '''
 
-    elif tab == 'payments':
-        # Build payment method options with active selection
+        elif tab == 'payments':
+        # Build payment method options
         payment_methods = [
             ('manual', 'Manual (SMS Verification)'),
             ('yo', 'Yo! Payments'),
@@ -3307,7 +3307,10 @@ def settings():
             for val, label in payment_methods
         )
 
-        # Generate callback URLs for each method
+        # Load the payment name from settings
+        payment_name = get_setting(pid, 'payment_name', '')
+
+        # Generate callback URLs
         iotec_callback_url = url_for('iotec_callback', _external=True)
         pawapay_callback_url = url_for('pawapay_callback', _external=True)
         pesapal_callback_url = url_for('pesapal_callback', _external=True)
@@ -3323,6 +3326,11 @@ def settings():
                 <input type="text" name="mtn_number" value="{provider["mtn_number"] if provider else ''}">
                 <label>Airtel Money Number</label>
                 <input type="text" name="airtel_number" value="{provider["airtel_number"] if provider else ''}">
+
+                <!-- NEW FIELD: Payment Name -->
+                <label>Payment Name (displayed to customers)</label>
+                <input type="text" name="payment_name" value="{payment_name}">
+                <small style="color:var(--text-secondary);">This name will appear on the payment instructions page.</small>
 
                 <hr>
                 <h4>Yo! Payments</h4>
