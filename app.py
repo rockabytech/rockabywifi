@@ -1304,6 +1304,9 @@ def sms_verify():
     provider = get_provider(pid)
     active_method = get_setting(pid, 'active_payment_method', 'manual')
 
+    # ---- GET THE PAYMENT NAME (from settings or fallback to business name) ----
+    display_name = get_setting(pid, 'payment_name', provider['business_name'] if provider else 'RockabyWiFi')
+
     # ---- POST: only for manual SMS verification ----
     if request.method == 'POST':
         if active_method != 'manual':
@@ -1340,30 +1343,34 @@ def sms_verify():
                     err = "Payment not sent to the correct provider number."
 
         if err:
-            return render_page(
-                "Verify Payment",
-                f'<div class="card"><div class="alert alert-error">{err}</div>'
-                f'<form method="POST">'
-                f'<input type="hidden" name="phone" value="{phone}">'
-                f'<input type="hidden" name="plan_id" value="{plan_id}">'
-                f'<input type="hidden" name="pid" value="{pid}">'
-                f'<label>Paste Full MTN/Airtel SMS Here</label>'
-                f'<textarea name="raw_sms" rows="6" required></textarea>'
-                f'<button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button>'
-                f'</form></div>',
-                pc, pid, admin=False
-            )
+            # Show the form again with the error
+            content = f'''
+            <div class="card">
+                <div class="alert alert-error">{err}</div>
+                <form method="POST">
+                    <input type="hidden" name="phone" value="{phone}">
+                    <input type="hidden" name="plan_id" value="{plan_id}">
+                    <input type="hidden" name="pid" value="{pid}">
+                    <label>Paste Full MTN/Airtel SMS Here</label>
+                    <textarea name="raw_sms" rows="6" required></textarea>
+                    <button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button>
+                </form>
+            </div>
+            '''
+            return render_page("Verify Payment", content, pc, pid, admin=False)
 
+        # Check duplicate transaction
         if db.execute(
             "SELECT COUNT(*) as cnt FROM voucher_requests WHERE transaction_id=? AND provider_id=?",
             (parsed['tid'], pid)
         ).fetchone()['cnt'] > 0:
-            return render_page(
-                "Verify Payment",
-                '<div class="card"><div class="alert alert-error">This Transaction ID has already been used.</div>'
-                f'<p><a href="/?pid={pid}" class="btn">Back to Home</a></p></div>',
-                pc, pid, admin=False
-            )
+            content = f'''
+            <div class="card">
+                <div class="alert alert-error">This Transaction ID has already been used.</div>
+                <p><a href="/?pid={pid}" class="btn">Back to Home</a></p>
+            </div>
+            '''
+            return render_page("Verify Payment", content, pc, pid, admin=False)
 
         auto = provider['auto_approve'] if provider else 1
         status = 'approved' if auto else 'pending'
@@ -1397,12 +1404,12 @@ def sms_verify():
                 (pid, phone, plan_id, raw, parsed['tid'], parsed['amount'], rf, parsed['date'])
             )
             db.commit()
-            content = '''
+            content = f'''
             <div class="card">
                 <div class="alert alert-success">Payment submitted! Waiting for approval.</div>
                 <p><a href="/?pid={pid}" class="btn">Back to Home</a></p>
             </div>
-            '''.format(pid=pid)
+            '''
             return render_page("Verification Result", content, get_pending_count(pid), pid, admin=False)
 
     # ---- GET: handle based on active payment method ----
@@ -1413,7 +1420,64 @@ def sms_verify():
             <p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p>
             <p><strong>Pay to:</strong></p>
             <p>MTN: {provider["mtn_number"] if provider and provider["mtn_number"] else 'N/A'} | Airtel: {provider["airtel_number"] if provider and provider["airtel_number"] else 'N/A'}</p>
-            <p style="color:#666;">Name: {provider["business_name"] if provider else "RockabyWiFi"}</p>
+            <p style="color:#666;">Name: {display_name}</p>   <!-- payment name displayed here -->
+            <hr>
+            <p style="margin-top:15px;"><strong>After payment, paste the full SMS below:</strong></p>
+            <form method="POST">
+                <input type="hidden" name="phone" value="{phone}">
+                <input type="hidden" name="plan_id" value="{plan_id}">
+                <input type="hidden" name="pid" value="{pid}">
+                <label>Paste Full MTN/Airtel SMS Here</label>
+                <textarea name="raw_sms" rows="6" required></textarea>
+                <button type="submit" class="btn" style="margin-top:20px;width:100%;">Verify Payment</button>
+            </form>
+        </div>
+        '''
+        return render_page("Verify Payment", content, pc, pid, admin=False)
+
+    elif active_method == 'yo':
+        if not provider['yo_username'] or not provider['yo_password']:
+            return render_page(
+                "Payment Error",
+                '<div class="card"><div class="alert alert-error">Yo! Payments is not configured. Please contact the provider.</div></div>',
+                pc, pid, admin=False
+            )
+        if phone:
+            return redirect(url_for('yo_pay', pid=pid, phone=phone, plan_id=plan_id))
+        else:
+            content = f'''
+            <div class="card">
+                <div class="card-header">Pay with Yo! Payments</div>
+                <p>You are about to purchase <strong>{plan["name"]}</strong> for UGX {plan["price_ugx"]:,}.</p>
+                <form method="GET" action="/yo-pay">
+                    <input type="hidden" name="pid" value="{pid}">
+                    <input type="hidden" name="plan_id" value="{plan_id}">
+                    <label>Your Phone Number *</label>
+                    <input type="tel" name="phone" required>
+                    <button type="submit" class="btn" style="margin-top:20px;width:100%;">Pay Now</button>
+                </form>
+            </div>
+            '''
+            return render_page("Yo! Payment", content, pc, pid, admin=False)
+
+    elif active_method == 'iotec':
+        return redirect(url_for('pay_iotec', pid=pid, plan_id=plan_id, phone=phone))
+
+    elif active_method == 'pawapay':
+        return redirect(url_for('pay_pawapay', pid=pid, plan_id=plan_id, phone=phone))
+
+    elif active_method == 'pesapal':
+        return redirect(url_for('pay_pesapal', pid=pid, plan_id=plan_id, phone=phone))
+
+    else:
+        # Fallback to manual
+        content = f'''
+        <div class="card">
+            <div class="card-header">Pay for Internet</div>
+            <p><strong>Selected Plan:</strong> {plan["name"]} – {plan["duration_minutes"]} min – UGX {plan["price_ugx"]:,}</p>
+            <p><strong>Pay to:</strong></p>
+            <p>MTN: {provider["mtn_number"] if provider and provider["mtn_number"] else 'N/A'} | Airtel: {provider["airtel_number"] if provider and provider["airtel_number"] else 'N/A'}</p>
+            <p style="color:#666;">Name: {display_name}</p>   <!-- payment name displayed here -->
             <hr>
             <p style="margin-top:15px;"><strong>After payment, paste the full SMS below:</strong></p>
             <form method="POST">
