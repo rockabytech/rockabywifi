@@ -3511,7 +3511,7 @@ def billing():
         days_until_expiry = (expiry_date.date() - today).days
         is_expired = days_until_expiry < 0
     
-    # Calculate platform fee (use provider's percent_fee)
+    # Calculate platform fee
     today = date.today()
     month_start = today.replace(day=1).isoformat()
     total_revenue = db.execute(
@@ -3520,15 +3520,12 @@ def billing():
         (pid, month_start)
     ).fetchone()['total']
     
-    # FIXED: Use bracket access with is not None checks
     percent = provider['percent_fee'] if provider and provider['percent_fee'] is not None else 5.0
     platform_fee = int(total_revenue * (percent / 100))
-    
-    # FIXED: Use bracket access with is not None checks
     monthly_fee = provider['monthly_fee_ugx'] if provider and provider['monthly_fee_ugx'] is not None else 20000
     total_due = platform_fee + monthly_fee
     
-    # Generate dynamic invoice number
+    # Generate invoice number
     current_year_month = datetime.now().strftime('%Y%m')
     count_invoices = db.execute(
         "SELECT COUNT(*) as cnt FROM invoices "
@@ -3583,7 +3580,11 @@ def billing():
             <p style="margin:0; color:var(--text-secondary);">
                 Your subscription expires in {days_until_expiry} day(s). You can now renew your license.
             </p>
-            <a href="#" class="btn" style="margin-top:10px;">Pay Now UGX {total_due:,}</a>
+            <form method="POST" action="/renew-subscription" style="margin-top:10px;">
+                <input type="hidden" name="pid" value="{pid}">
+                <input type="hidden" name="amount" value="{total_due}">
+                <button type="submit" class="btn">Pay Now UGX {total_due:,}</button>
+            </form>
         </div>
         '''
     else:
@@ -3597,7 +3598,7 @@ def billing():
         </div>
         '''
     
-    # Invoice Modal
+    # Invoice Modal (same as before – but now shows total_due dynamically)
     invoice_modal = f'''
     <div id="invoiceModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:99999; overflow-y:auto; padding:40px 20px;">
         <div style="max-width:800px; margin:0 auto; background:var(--card-bg); border-radius:var(--radius); padding:40px; box-shadow:var(--shadow); border:1px solid var(--glass-border); position:relative;">
@@ -3682,7 +3683,6 @@ def billing():
     </div>
     '''
     
-    # Main content
     content = f'''
     <div class="card">
         <div class="card-header">
@@ -3700,7 +3700,7 @@ def billing():
         </div>
     </div>
     
-    <!-- Payment History Table -->
+    <!-- Payment History -->
     <div class="card">
         <div class="card-header">
             <i class="fas fa-history"></i> Payment History
@@ -3749,6 +3749,52 @@ def billing():
     '''
     
     return render_page("Billing & Subscription", content, get_pending_count(pid), pid, admin=True)
+
+@app.route('/renew-subscription', methods=['POST'])
+@login_required
+def renew_subscription():
+    pid = session['provider_id']
+    amount = int(request.form.get('amount', 0))
+    if amount <= 0:
+        return "Invalid amount", 400
+    
+    db = get_db()
+    provider = get_provider(pid)
+    
+    # Generate invoice number
+    current_year_month = datetime.now().strftime('%Y%m')
+    count_invoices = db.execute(
+        "SELECT COUNT(*) as cnt FROM invoices "
+        "WHERE provider_id = ? AND invoice_no LIKE ?",
+        (pid, f'INV-{current_year_month}-%')
+    ).fetchone()['cnt']
+    next_sequence = count_invoices + 1
+    invoice_no = f"INV-{current_year_month}-{next_sequence:03d}"
+    
+    # Create pending invoice
+    db.execute("""
+        INSERT INTO invoices (provider_id, invoice_no, user_id, amount, paid_amount, status, due_date)
+        VALUES (?, ?, ?, ?, 0, 'pending', date('now', '+30 days'))
+    """, (pid, invoice_no, 0, amount))
+    
+    # Log audit
+    db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'renewal_request',?)",
+               (f"Provider {provider['business_name']} requested renewal. Invoice {invoice_no} pending.",))
+    db.commit()
+    
+    # Render success page
+    content = f'''
+    <div class="card">
+        <div class="card-header">✅ Renewal Request Submitted</div>
+        <p>Your renewal request has been submitted and is waiting for approval.</p>
+        <p><strong>Invoice #:</strong> {invoice_no}</p>
+        <p><strong>Amount:</strong> UGX {amount:,}</p>
+        <p>You will be notified once the invoice is approved and your subscription is extended.</p>
+        <a href="/billing" class="btn">Back to Billing</a>
+    </div>
+    '''
+    return render_page("Renewal Requested", content, get_pending_count(pid), pid, admin=True)
+
 # ============================================================
 # SUPER ADMIN
 # ============================================================
@@ -3773,6 +3819,7 @@ def super_admin_dashboard():
     
     db = get_db()
     
+    # ---- STATS ----
     total_providers = db.execute("SELECT COUNT(*) as c FROM providers").fetchone()['c']
     active_providers = db.execute("SELECT COUNT(*) as c FROM providers WHERE is_active=1").fetchone()['c']
     total_revenue = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE status='approved'").fetchone()['t']
@@ -3782,6 +3829,32 @@ def super_admin_dashboard():
     today_revenue = db.execute("SELECT COALESCE(SUM(amount),0) as t FROM voucher_requests WHERE status='approved' AND date(created_at)=?", (today,)).fetchone()['t']
     pending_approvals = db.execute("SELECT COUNT(*) as c FROM voucher_requests WHERE status='pending'").fetchone()['c']
     
+    # ---- PENDING INVOICES ----
+    pending_invoices = db.execute(
+        "SELECT i.*, p.business_name FROM invoices i "
+        "JOIN providers p ON i.provider_id = p.id "
+        "WHERE i.status = 'pending' ORDER BY i.created_at DESC"
+    ).fetchall()
+    
+    invoice_rows = ''
+    if pending_invoices:
+        for inv in pending_invoices:
+            invoice_rows += f'''
+            <tr>
+                <td>{inv['invoice_no']}</td>
+                <td>{inv['business_name']}</td>
+                <td>UGX {inv['amount']:,}</td>
+                <td>{inv['created_at'][:16] if inv['created_at'] else '-'}</td>
+                <td>{inv['due_date']}</td>
+                <td>
+                    <a href="/admin/approve-invoice/{inv['id']}" class="btn btn-small btn-success" onclick="return confirm('Approve this invoice and extend subscription by 30 days?')">Approve</a>
+                </td>
+            </tr>
+            '''
+    else:
+        invoice_rows = '<tr><td colspan="6" style="text-align:center; padding:20px;">No pending invoices.</td></tr>'
+    
+    # ---- PROVIDER LIST ----
     providers = db.execute("SELECT * FROM providers ORDER BY id").fetchall()
     rows = ''
     for p in providers:
@@ -3826,9 +3899,11 @@ def super_admin_dashboard():
         </tr>
         '''
     
+    # ---- AUDIT LOG ----
     audit = db.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 20").fetchall()
     audit_rows = ''.join(f'<tr><td>{a["created_at"][:16]}</td><td>{a["action"]}</td><td>{a["details"]}</td></tr>' for a in audit) or '<tr><td colspan="3">No activity yet.</td></tr>'
     
+    # ---- RENDER CONTENT ----
     content = f'''
     <div class="stat-grid">
         <div class="stat-card"><h3>{total_providers}</h3><small>Total Providers</small></div>
@@ -3838,9 +3913,12 @@ def super_admin_dashboard():
         <div class="stat-card"><h3>{total_users}</h3><small>End Users</small></div>
         <div class="stat-card"><h3>{pending_approvals}</h3><small>Pending</small></div>
     </div>
+    
     <div class="card">
         <div class="card-header">Today: UGX {today_revenue or 0:,} revenue | UGX {int(today_revenue * 0.05):,} your fee</div>
     </div>
+    
+    <!-- Provider Management -->
     <div class="card">
         <div class="card-header">Provider Management <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a></div>
         <div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
@@ -3856,8 +3934,28 @@ def super_admin_dashboard():
             </table>
         </div>
     </div>
-
-    <!-- ===== NEW: DATABASE MANAGEMENT CARD ===== -->
+    
+    <!-- Pending Invoices -->
+    <div class="card">
+        <div class="card-header">📄 Pending Invoices <span class="badge" style="background:#ffc107; color:#000;">{len(pending_invoices)}</span></div>
+        <div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Invoice #</th>
+                        <th>Provider</th>
+                        <th>Amount</th>
+                        <th>Requested</th>
+                        <th>Due Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>{invoice_rows}</tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Database Management -->
     <div class="card">
         <div class="card-header">💾 Database Management</div>
         <div style="display:flex; gap:15px; flex-wrap:wrap;">
@@ -3869,7 +3967,8 @@ def super_admin_dashboard():
             Backups are stored in the <code>backups/</code> folder. Restoring will overwrite the current database – a backup is created automatically before restore.
         </small>
     </div>
-
+    
+    <!-- Recent Activity -->
     <div class="card">
         <div class="card-header">🕒 Recent Activity</div>
         <div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
@@ -3879,6 +3978,7 @@ def super_admin_dashboard():
             </table>
         </div>
     </div>
+    
     <p style="margin-top:20px;"><a href="/admin/logout" class="btn btn-outline">Logout</a></p>
     '''
     return render_page("Super Admin Dashboard", content, 0, admin=False)
@@ -4211,6 +4311,38 @@ def delete_provider(pid):
         db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'delete_provider',?)",
                    (f"Deleted provider: {prov['business_name']}",))
         db.commit()
+    return redirect('/admin/dashboard')
+
+@app.route('/admin/approve-invoice/<int:invoice_id>')
+def approve_invoice(invoice_id):
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    
+    db = get_db()
+    inv = db.execute("SELECT * FROM invoices WHERE id=? AND status='pending'", (invoice_id,)).fetchone()
+    if not inv:
+        return "Invoice not found or already processed", 404
+    
+    # Mark invoice as paid
+    db.execute("UPDATE invoices SET status='paid', paid_amount=amount WHERE id=?", (invoice_id,))
+    
+    # Extend provider subscription by 30 days
+    provider_id = inv['provider_id']
+    prov = db.execute("SELECT subscription_expiry FROM providers WHERE id=?", (provider_id,)).fetchone()
+    if prov and prov['subscription_expiry']:
+        current_expiry = datetime.strptime(prov['subscription_expiry'], '%Y-%m-%d')
+        new_expiry = current_expiry + timedelta(days=30)
+        new_expiry_str = new_expiry.strftime('%Y-%m-%d')
+    else:
+        new_expiry_str = (date.today() + timedelta(days=30)).isoformat()
+    
+    db.execute("UPDATE providers SET subscription_expiry=?, is_active=1 WHERE id=?", (new_expiry_str, provider_id))
+    
+    # Log audit
+    db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'approve_invoice',?)",
+               (f"Approved invoice {inv['invoice_no']} for provider {provider_id}. Extended to {new_expiry_str}",))
+    db.commit()
+    
     return redirect('/admin/dashboard')
 
 @app.route('/admin/logout')
