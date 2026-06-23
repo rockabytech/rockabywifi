@@ -1210,7 +1210,7 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False, the
 def home():
     pid = request.args.get('pid', 1, type=int)
     # At the top of your home() route, after getting pid:
-ref_code = request.args.get('ref', '')
+    ref_code = request.args.get('ref', '')
 if ref_code:
     # Store referral code in session for later use
     session['referral_code'] = ref_code
