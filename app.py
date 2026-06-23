@@ -1209,11 +1209,17 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False, the
 @app.route('/')
 def home():
     pid = request.args.get('pid', 1, type=int)
-    # At the top of your home() route, after getting pid:
+    
+    # ---- REFERRAL CODE DETECTION ----
     ref_code = request.args.get('ref', '')
-if ref_code:
-    # Store referral code in session for later use
-    session['referral_code'] = ref_code
+    if ref_code:
+        session['referral_code'] = ref_code
+        # Optional: log referral visit
+        # db = get_db()
+        # db.execute("INSERT INTO referral_visits (referral_code, ip_address) VALUES (?, ?)", (ref_code, request.remote_addr))
+        # db.commit()
+    # ---- END REFERRAL CODE ----
+    
     p = get_provider(pid)
     if not p:
         return "Provider not found.", 404
