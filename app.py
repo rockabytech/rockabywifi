@@ -466,8 +466,80 @@ def init_db():
         if c.fetchone()[0] == 0:
             c.execute("INSERT INTO plans (provider_id, name, duration_minutes, price_ugx, is_public, speed_down, speed_up) VALUES (1,'Free Trial',5,0,0,'1M','512k')")
 
+    # Referral codes table
+c.execute('''CREATE TABLE IF NOT EXISTS referral_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id INTEGER NOT NULL UNIQUE,
+    code TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(provider_id) REFERENCES providers(id)
+)''')
+
+# Referral tracking table
+c.execute('''CREATE TABLE IF NOT EXISTS referrals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    referrer_id INTEGER NOT NULL,
+    referred_email TEXT,
+    referred_phone TEXT,
+    referred_provider_id INTEGER,
+    status TEXT DEFAULT 'pending', -- pending, completed, rewarded
+    reward_amount REAL DEFAULT 0,
+    reward_type TEXT DEFAULT 'discount', -- discount, credit
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    FOREIGN KEY(referrer_id) REFERENCES providers(id),
+    FOREIGN KEY(referred_provider_id) REFERENCES providers(id)
+)''')
+
+# Referral rewards settings (per provider)
+c.execute('''CREATE TABLE IF NOT EXISTS referral_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id INTEGER NOT NULL UNIQUE,
+    reward_percentage INTEGER DEFAULT 10,
+    reward_fixed_amount REAL DEFAULT 0,
+    reward_type TEXT DEFAULT 'discount',
+    max_referrals INTEGER DEFAULT 10,
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(provider_id) REFERENCES providers(id)
+)''')
+
     conn.commit()
     conn.close()
+
+def generate_referral_code(provider_id):
+    """Generate a unique referral code for a provider"""
+    import hashlib
+    code = f"REF-{hashlib.md5(f'{provider_id}{datetime.now().timestamp()}'.encode()).hexdigest()[:6].upper()}"
+    return code
+
+def get_referral_code(provider_id):
+    """Get or create referral code for a provider"""
+    db = get_db()
+    row = db.execute("SELECT code FROM referral_codes WHERE provider_id=?", (provider_id,)).fetchone()
+    if row:
+        return row['code']
+    # Generate new code
+    code = generate_referral_code(provider_id)
+    db.execute("INSERT INTO referral_codes (provider_id, code) VALUES (?,?)", (provider_id, code))
+    db.commit()
+    return code
+
+def get_referral_stats(provider_id):
+    """Get referral statistics for a provider"""
+    db = get_db()
+    total = db.execute("SELECT COUNT(*) as cnt FROM referrals WHERE referrer_id=?", (provider_id,)).fetchone()['cnt']
+    pending = db.execute("SELECT COUNT(*) as cnt FROM referrals WHERE referrer_id=? AND status='pending'", (provider_id,)).fetchone()['cnt']
+    completed = db.execute("SELECT COUNT(*) as cnt FROM referrals WHERE referrer_id=? AND status='completed'", (provider_id,)).fetchone()['cnt']
+    rewarded = db.execute("SELECT COUNT(*) as cnt FROM referrals WHERE referrer_id=? AND status='rewarded'", (provider_id,)).fetchone()['cnt']
+    total_rewards = db.execute("SELECT COALESCE(SUM(reward_amount),0) as total FROM referrals WHERE referrer_id=? AND status='rewarded'", (provider_id,)).fetchone()['total']
+    return {
+        'total': total,
+        'pending': pending,
+        'completed': completed,
+        'rewarded': rewarded,
+        'total_rewards': total_rewards
+    }
 
 def backup_database():
     os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -1137,6 +1209,11 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False, the
 @app.route('/')
 def home():
     pid = request.args.get('pid', 1, type=int)
+    # At the top of your home() route, after getting pid:
+ref_code = request.args.get('ref', '')
+if ref_code:
+    # Store referral code in session for later use
+    session['referral_code'] = ref_code
     p = get_provider(pid)
     if not p:
         return "Provider not found.", 404
@@ -3489,7 +3566,151 @@ def system_logs():
 @app.route('/refer')
 @login_required
 def refer():
-    return render_page("Refer a Friend", '<div class="card"><p>Your referral link: <code>https://rockabywifi.com/?ref=...</code></p></div>', get_pending_count(session['provider_id']), session['provider_id'], admin=True)
+    pid = session['provider_id']
+    db = get_db()
+    provider = get_provider(pid)
+    
+    # Get or create referral code
+    referral_code = get_referral_code(pid)
+    
+    # Get referral settings (or create default)
+    settings = db.execute("SELECT * FROM referral_settings WHERE provider_id=?", (pid,)).fetchone()
+    if not settings:
+        db.execute("""
+            INSERT INTO referral_settings (provider_id, reward_percentage, reward_fixed_amount, reward_type, max_referrals)
+            VALUES (?, 10, 0, 'discount', 10)
+        """, (pid,))
+        db.commit()
+        settings = db.execute("SELECT * FROM referral_settings WHERE provider_id=?", (pid,)).fetchone()
+    
+    # Get referral history
+    referrals = db.execute(
+        "SELECT * FROM referrals WHERE referrer_id=? ORDER BY created_at DESC LIMIT 20",
+        (pid,)
+    ).fetchall()
+    
+    # Get stats
+    stats = get_referral_stats(pid)
+    
+    # Build referral link
+    base_url = request.base_url.replace('/refer', '')
+    referral_link = f"{base_url}/?ref={referral_code}"
+    
+    # Build referral history rows
+    referral_rows = ''
+    if referrals:
+        for r in referrals:
+            status_badge = {
+                'pending': '<span class="badge" style="background:#ffc107;color:#000;">Pending</span>',
+                'completed': '<span class="badge" style="background:#17a2b8;color:#fff;">Completed</span>',
+                'rewarded': '<span class="badge" style="background:#28a745;color:#fff;">Rewarded</span>'
+            }.get(r['status'], r['status'])
+            
+            referral_rows += f'''
+            <tr>
+                <td>{r['referred_email'] or r['referred_phone'] or 'N/A'}</td>
+                <td>{r['created_at'][:16] if r['created_at'] else '-'}</td>
+                <td>{r['completed_at'][:16] if r['completed_at'] else '-'}</td>
+                <td>{status_badge}</td>
+                <td>UGX {r['reward_amount'] or 0:,}</td>
+            </tr>
+            '''
+    else:
+        referral_rows = '<tr><td colspan="5" style="text-align:center;padding:20px;">No referrals yet. Share your link to get started!</td></tr>'
+    
+    content = f'''
+    <!-- Referral Stats -->
+    <div class="stat-grid" style="margin-bottom:20px;">
+        <div class="stat-card">
+            <h3>{stats['total']}</h3>
+            <small>Total Referrals</small>
+        </div>
+        <div class="stat-card">
+            <h3>{stats['pending']}</h3>
+            <small>Pending</small>
+        </div>
+        <div class="stat-card">
+            <h3>{stats['completed']}</h3>
+            <small>Completed</small>
+        </div>
+        <div class="stat-card">
+            <h3>UGX {stats['total_rewards']:,}</h3>
+            <small>Total Rewards Earned</small>
+        </div>
+    </div>
+    
+    <!-- Referral Link Card -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-share-alt"></i> Your Referral Link
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+            <input type="text" id="referralLink" value="{referral_link}" readonly 
+                   style="flex:1; min-width:200px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+            <button class="btn btn-success" onclick="copyReferralLink()">
+                <i class="fas fa-copy"></i> Copy Link
+            </button>
+            <a href="https://wa.me/?text=Join%20RockabyWiFi%20using%20my%20referral%20link%3A%20{referral_link}" 
+               target="_blank" class="btn" style="background:#25D366; color:white;">
+                <i class="fab fa-whatsapp"></i> Share
+            </a>
+            <a href="https://www.facebook.com/sharer/sharer.php?u={referral_link}" 
+               target="_blank" class="btn" style="background:#1877f2; color:white;">
+                <i class="fab fa-facebook"></i> Share
+            </a>
+        </div>
+        <div style="margin-top:15px; padding:15px; background:var(--bg); border-radius:8px;">
+            <p><strong>Referral Code:</strong> <code style="font-size:1.2rem; background:var(--card-bg); padding:4px 12px; border-radius:6px;">{referral_code}</code></p>
+            <p style="color:var(--text-secondary); font-size:0.9rem;">
+                <i class="fas fa-info-circle"></i> 
+                Share your referral link with friends. When they sign up and make their first payment, you earn a <strong>{settings['reward_percentage']}%</strong> discount on your next invoice!
+            </p>
+            <p style="color:var(--text-secondary); font-size:0.9rem;">
+                <i class="fas fa-gift"></i> 
+                Reward: {settings['reward_type'].title()} of <strong>{settings['reward_percentage']}%</strong> (up to {settings['max_referrals']} referrals)
+            </p>
+        </div>
+    </div>
+    
+    <!-- Referral History -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-history"></i> Referral History
+        </div>
+        <div class="table-responsive" style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Referred</th>
+                        <th>Date</th>
+                        <th>Completed</th>
+                        <th>Status</th>
+                        <th>Reward</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {referral_rows}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <script>
+        function copyReferralLink() {{
+            var link = document.getElementById('referralLink');
+            link.select();
+            document.execCommand('copy');
+            // Show feedback
+            var btn = event.target.closest('button');
+            var originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+            setTimeout(function() {{
+                btn.innerHTML = originalText;
+            }}, 2000);
+        }}
+    </script>
+    '''
+    return render_page("Refer a Friend", content, get_pending_count(pid), pid, admin=True)
 
 @app.route('/docs')
 @login_required
@@ -4400,6 +4621,61 @@ def approve_invoice(invoice_id):
     db.commit()
     
     return redirect('/admin/dashboard')
+
+@app.route('/admin/referral-settings/<int:pid>', methods=['GET', 'POST'])
+def admin_referral_settings(pid):
+    if not session.get('super_admin'):
+        return redirect('/admin')
+    
+    db = get_db()
+    settings = db.execute("SELECT * FROM referral_settings WHERE provider_id=?", (pid,)).fetchone()
+    if not settings:
+        db.execute("""
+            INSERT INTO referral_settings (provider_id, reward_percentage, reward_fixed_amount, reward_type, max_referrals)
+            VALUES (?, 10, 0, 'discount', 10)
+        """, (pid,))
+        db.commit()
+        settings = db.execute("SELECT * FROM referral_settings WHERE provider_id=?", (pid,)).fetchone()
+    
+    provider = db.execute("SELECT business_name FROM providers WHERE id=?", (pid,)).fetchone()
+    
+    if request.method == 'POST':
+        db.execute("""
+            UPDATE referral_settings SET
+                reward_percentage=?, reward_fixed_amount=?, reward_type=?, max_referrals=?, is_active=?
+            WHERE provider_id=?
+        """, (
+            int(request.form.get('reward_percentage', 10)),
+            float(request.form.get('reward_fixed_amount', 0)),
+            request.form.get('reward_type', 'discount'),
+            int(request.form.get('max_referrals', 10)),
+            1 if request.form.get('is_active') else 0,
+            pid
+        ))
+        db.commit()
+        return redirect('/admin/dashboard')
+    
+    content = f'''
+    <div class="card">
+        <div class="card-header">Referral Settings for {provider['business_name'] if provider else 'Provider'}</div>
+        <form method="POST">
+            <label>Reward Type</label>
+            <select name="reward_type">
+                <option value="discount" {"selected" if settings['reward_type'] == 'discount' else ""}>Discount</option>
+                <option value="credit" {"selected" if settings['reward_type'] == 'credit' else ""}>Credit</option>
+            </select>
+            <label>Reward Percentage (%)</label>
+            <input type="number" name="reward_percentage" value="{settings['reward_percentage']}" min="0" max="100">
+            <label>Fixed Reward Amount (UGX) – leave 0 if using percentage</label>
+            <input type="number" name="reward_fixed_amount" value="{settings['reward_fixed_amount']}" step="100" min="0">
+            <label>Max Referrals</label>
+            <input type="number" name="max_referrals" value="{settings['max_referrals']}" min="1">
+            <label><input type="checkbox" name="is_active" {"checked" if settings['is_active'] else ""}> Active</label>
+            <button type="submit" class="btn" style="margin-top:20px;">Save Settings</button>
+        </form>
+    </div>
+    '''
+    return render_page("Referral Settings", content, 0, admin=False)
 
 @app.route('/admin/logout')
 def super_admin_logout():
