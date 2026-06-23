@@ -467,7 +467,7 @@ def init_db():
             c.execute("INSERT INTO plans (provider_id, name, duration_minutes, price_ugx, is_public, speed_down, speed_up) VALUES (1,'Free Trial',5,0,0,'1M','512k')")
 
     # Referral codes table
-c.execute('''CREATE TABLE IF NOT EXISTS referral_codes (
+    c.execute('''CREATE TABLE IF NOT EXISTS referral_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_id INTEGER NOT NULL UNIQUE,
     code TEXT NOT NULL UNIQUE,
@@ -475,8 +475,8 @@ c.execute('''CREATE TABLE IF NOT EXISTS referral_codes (
     FOREIGN KEY(provider_id) REFERENCES providers(id)
 )''')
 
-# Referral tracking table
-c.execute('''CREATE TABLE IF NOT EXISTS referrals (
+    # Referral tracking table
+    c.execute('''CREATE TABLE IF NOT EXISTS referrals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     referrer_id INTEGER NOT NULL,
     referred_email TEXT,
@@ -491,8 +491,8 @@ c.execute('''CREATE TABLE IF NOT EXISTS referrals (
     FOREIGN KEY(referred_provider_id) REFERENCES providers(id)
 )''')
 
-# Referral rewards settings (per provider)
-c.execute('''CREATE TABLE IF NOT EXISTS referral_settings (
+    # Referral rewards settings (per provider)
+    c.execute('''CREATE TABLE IF NOT EXISTS referral_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_id INTEGER NOT NULL UNIQUE,
     reward_percentage INTEGER DEFAULT 10,
