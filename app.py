@@ -655,6 +655,68 @@ def yo_charge(phone, amount, plan_name, provider):
     except Exception as e: print(f"Yo! Payments error: {e}")
     return None
 
+def process_referral(provider_id, amount):
+    """
+    Check if there's a referral code in session, and if so,
+    create a pending referral record for the provider making a payment.
+    """
+    if 'referral_code' not in session:
+        return False
+    
+    ref_code = session['referral_code']
+    db = get_db()
+    
+    # Find the referrer (provider who owns this referral code)
+    referrer = db.execute(
+        "SELECT provider_id FROM referral_codes WHERE code = ?",
+        (ref_code,)
+    ).fetchone()
+    if not referrer:
+        return False
+    
+    referrer_id = referrer['provider_id']
+    
+    # Prevent self-referral
+    if referrer_id == provider_id:
+        return False
+    
+    # Check if this provider has already been referred by this referrer
+    existing = db.execute(
+        "SELECT id FROM referrals WHERE referrer_id = ? AND referred_provider_id = ?",
+        (referrer_id, provider_id)
+    ).fetchone()
+    if existing:
+        return False
+    
+    # Get referral settings for the referrer
+    settings = db.execute(
+        "SELECT reward_percentage, reward_type, max_referrals FROM referral_settings WHERE provider_id = ?",
+        (referrer_id,)
+    ).fetchone()
+    if not settings:
+        settings = {'reward_percentage': 10, 'reward_type': 'discount', 'max_referrals': 10}
+    
+    # Count completed referrals already
+    count = db.execute(
+        "SELECT COUNT(*) as cnt FROM referrals WHERE referrer_id = ? AND status IN ('completed', 'rewarded')",
+        (referrer_id,)
+    ).fetchone()['cnt']
+    
+    if count >= settings['max_referrals']:
+        return False
+    
+    # Insert pending referral (reward will be calculated when invoice is approved)
+    db.execute("""
+        INSERT INTO referrals (referrer_id, referred_provider_id, status, reward_amount, reward_type)
+        VALUES (?, ?, 'pending', 0, ?)
+    """, (referrer_id, provider_id, settings['reward_type']))
+    db.commit()
+    
+    # Clear the session so we don't track again
+    session.pop('referral_code', None)
+    
+    return True
+
 # ------------------------------------------------------------
 # BASE TEMPLATE – Glassmorphism + Dark Mode
 # ------------------------------------------------------------
@@ -4007,6 +4069,10 @@ def renew_subscription():
         VALUES (?, ?, ?, ?, 0, 'pending', date('now', '+30 days'))
     """, (pid, invoice_no, 0, amount))
     
+    # ===== TRACK REFERRAL =====
+    process_referral(pid, amount)
+    # ===== END REFERRAL =====
+    
     # Log audit
     db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'renewal_request',?)",
                (f"Provider {provider['business_name']} requested renewal. Invoice {invoice_no} pending.",))
@@ -4084,7 +4150,7 @@ def super_admin_dashboard():
     else:
         invoice_rows = '<tr><td colspan="6" style="text-align:center; padding:20px;">No pending invoices.</td></tr>'
     
-    # ---- PROVIDER LIST WITH INLINE ACTION BUTTONS ----
+    # ---- PROVIDER LIST WITH REFERRALS ----
     providers = db.execute("SELECT * FROM providers ORDER BY id").fetchall()
     rows = ''
     for p in providers:
@@ -4093,6 +4159,12 @@ def super_admin_dashboard():
         fee = int(total * 0.05)
         monthly_fee = int(this_month * 0.05)
         voucher_count = db.execute("SELECT COUNT(*) as c FROM vouchers WHERE provider_id=?", (p['id'],)).fetchone()['c']
+        # ---- REFERRAL COUNT ----
+        ref_count = db.execute(
+            "SELECT COUNT(*) as cnt FROM referrals WHERE referred_provider_id = ? AND status IN ('completed', 'rewarded')",
+            (p['id'],)
+        ).fetchone()['cnt']
+        # ---- END REFERRAL COUNT ----
         sub_status = "Active" if p['is_active'] else "Suspended"
         expiry = p['subscription_expiry'] if p['subscription_expiry'] else '-'
         expired = False
@@ -4111,8 +4183,9 @@ def super_admin_dashboard():
             <td>UGX {fee:,}</td>
             <td>UGX {monthly_fee:,}</td>
             <td>{voucher_count}</td>
+            <td>{ref_count}</td>
             <td>{expiry}</td>
-            <td style="white-space: nowrap; min-width: 140px;">
+            <td style="white-space: nowrap; min-width: 180px;">
                 <div class="btn-group" style="display:flex; gap:4px; flex-wrap:wrap;">
                     <a href="/admin/edit-provider/{p['id']}" class="btn btn-small" title="Edit"><i class="fas fa-edit"></i></a>
                     <a href="/admin/extend/{p['id']}" class="btn btn-small btn-success" title="Extend"><i class="fas fa-calendar-plus"></i></a>
@@ -4120,6 +4193,7 @@ def super_admin_dashboard():
                     <a href="/admin/toggle-provider/{p['id']}" class="btn btn-small {'btn-danger' if p['is_active'] else 'btn-success'}" title="{'Suspend' if p['is_active'] else 'Activate'}">
                         <i class="fas {'fa-pause' if p['is_active'] else 'fa-play'}"></i>
                     </a>
+                    <a href="/admin/referral-settings/{p['id']}" class="btn btn-small" style="background:#fd7e14; color:white;" title="Referral Settings"><i class="fas fa-gift"></i></a>
                     <a href="/admin/delete-provider/{p['id']}" class="btn btn-small btn-danger" onclick="return confirm('Delete permanently?')" title="Delete"><i class="fas fa-trash"></i></a>
                 </div>
             </td>
@@ -4130,7 +4204,7 @@ def super_admin_dashboard():
     audit = db.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 20").fetchall()
     audit_rows = ''.join(f'<tr><td>{a["created_at"][:16]}</td><td>{a["action"]}</td><td>{a["details"]}</td></tr>' for a in audit) or '<tr><td colspan="3">No activity yet.</td></tr>'
     
-    # ---- CSS to prevent overflow ----
+    # ---- CSS FIX FOR OVERFLOW ----
     overflow_fix = '''
     <style>
         .table-responsive {
@@ -4138,7 +4212,7 @@ def super_admin_dashboard():
             -webkit-overflow-scrolling: touch;
         }
         .table-responsive table {
-            min-width: 900px;
+            min-width: 1100px;
             width: 100%;
         }
         .btn-group .btn {
@@ -4157,14 +4231,12 @@ def super_admin_dashboard():
             transform: scale(1.1);
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
-        /* Dropdown replacement: keep buttons visible and clean */
         td .btn-group {
             display: flex;
             gap: 4px;
             flex-wrap: wrap;
             justify-content: flex-start;
         }
-        /* Ensure card doesn't clip anything */
         .card {
             overflow: visible !important;
         }
@@ -4209,8 +4281,9 @@ def super_admin_dashboard():
                         <th>Total Fee</th>
                         <th>Fee/Mo</th>
                         <th>Vouchers</th>
+                        <th>Referrals</th>
                         <th>Expiry</th>
-                        <th style="min-width:140px;">Actions</th>
+                        <th style="min-width:180px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>{rows}</tbody>
@@ -4621,6 +4694,30 @@ def approve_invoice(invoice_id):
     
     db.execute("UPDATE providers SET subscription_expiry=?, is_active=1 WHERE id=?", (new_expiry_str, provider_id))
     
+    # ===== REFERRAL REWARD =====
+    # Check if there's a pending referral for this provider
+    referral = db.execute(
+        "SELECT id, referrer_id, reward_type FROM referrals WHERE referred_provider_id = ? AND status = 'pending'",
+        (provider_id,)
+    ).fetchone()
+    if referral:
+        # Get referrer's reward percentage
+        settings = db.execute(
+            "SELECT reward_percentage FROM referral_settings WHERE provider_id = ?",
+            (referral['referrer_id'],)
+        ).fetchone()
+        if settings:
+            reward_percentage = settings['reward_percentage']
+        else:
+            reward_percentage = 10  # default 10%
+        reward_amount = inv['amount'] * (reward_percentage / 100)
+        db.execute(
+            "UPDATE referrals SET status = 'completed', reward_amount = ? WHERE id = ?",
+            (reward_amount, referral['id'])
+        )
+        db.commit()
+    # ===== END REFERRAL =====
+    
     # Log audit
     db.execute("INSERT INTO audit_log (admin_id, action, details) VALUES (1,'approve_invoice',?)",
                (f"Approved invoice {inv['invoice_no']} for provider {provider_id}. Extended to {new_expiry_str}",))
@@ -4670,13 +4767,16 @@ def admin_referral_settings(pid):
                 <option value="discount" {"selected" if settings['reward_type'] == 'discount' else ""}>Discount</option>
                 <option value="credit" {"selected" if settings['reward_type'] == 'credit' else ""}>Credit</option>
             </select>
-            <label>Reward Percentage (%)</label>
+            <label>Reward Percentage (%) of invoice amount</label>
             <input type="number" name="reward_percentage" value="{settings['reward_percentage']}" min="0" max="100">
             <label>Fixed Reward Amount (UGX) – leave 0 if using percentage</label>
             <input type="number" name="reward_fixed_amount" value="{settings['reward_fixed_amount']}" step="100" min="0">
-            <label>Max Referrals</label>
+            <label>Max Referrals allowed</label>
             <input type="number" name="max_referrals" value="{settings['max_referrals']}" min="1">
-            <label><input type="checkbox" name="is_active" {"checked" if settings['is_active'] else ""}> Active</label>
+            <label>
+                <input type="checkbox" name="is_active" {"checked" if settings['is_active'] else ""}>
+                Active (allow referrals)
+            </label>
             <button type="submit" class="btn" style="margin-top:20px;">Save Settings</button>
         </form>
     </div>
