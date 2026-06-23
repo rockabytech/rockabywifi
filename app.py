@@ -1082,6 +1082,9 @@ def render_page(title, content, pending_count=0, provider_id=1, admin=False, the
     <button class="hamburger" onclick="toggleSidebar()">&#9776;</button>
     <div class="topbar-right">
         <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">🌓</button>
+        <button id="installBtn" class="btn btn-success btn-small" style="display:none;">
+        <i class="fas fa-download"></i> Install App
+    </button>
         <span style="color:#1a73e8; font-weight:600;">Welcome, {session["provider_name"]}</span>
         <div class="settings-dropdown">
             <a href="#" style="color:var(--text);text-decoration:none;font-size:1.3rem;"><i class="fas fa-cog"></i></a>
