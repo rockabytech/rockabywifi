@@ -3854,7 +3854,7 @@ def super_admin_dashboard():
     else:
         invoice_rows = '<tr><td colspan="6" style="text-align:center; padding:20px;">No pending invoices.</td></tr>'
     
-    # ---- PROVIDER LIST ----
+    # ---- PROVIDER LIST WITH INLINE ACTION BUTTONS ----
     providers = db.execute("SELECT * FROM providers ORDER BY id").fetchall()
     rows = ''
     for p in providers:
@@ -3882,18 +3882,15 @@ def super_admin_dashboard():
             <td>UGX {monthly_fee:,}</td>
             <td>{voucher_count}</td>
             <td>{expiry}</td>
-            <td style="overflow:visible; position:relative;">
-                <div class="dropdown" style="position:relative;display:inline-block;z-index:9999;">
-                    <button class="btn btn-small">&#8942;</button>
-                    <div class="dropdown-content" style="display:none;position:absolute;right:0;top:100%;background:var(--card-bg);backdrop-filter:blur(20px);border-radius:8px;box-shadow:0 8px 25px rgba(0,0,0,0.2);z-index:999999;overflow:visible;padding:5px 0;min-width:200px;white-space:nowrap;">
-                        <a href="/admin/impersonate/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-user-secret"></i> Impersonate</a>
-                        <a href="/admin/extend/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-calendar-plus"></i> Extend</a>
-                        <a href="/admin/edit-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-edit"></i> Edit</a>
-                        <a href="/admin/invoice/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-file-invoice"></i> Send Invoice</a>
-                        <a href="/admin/message/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-envelope"></i> Message</a>
-                        <a href="/admin/toggle-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;"><i class="fas fa-power-off"></i> {('Suspend' if p['is_active'] else 'Activate')}</a>
-                        <a href="/admin/delete-provider/{p['id']}" style="display:block;padding:10px 20px;color:var(--text);text-decoration:none;" onclick="return confirm('Delete permanently?')"><i class="fas fa-trash"></i> Delete</a>
-                    </div>
+            <td style="white-space: nowrap; min-width: 140px;">
+                <div class="btn-group" style="display:flex; gap:4px; flex-wrap:wrap;">
+                    <a href="/admin/edit-provider/{p['id']}" class="btn btn-small" title="Edit"><i class="fas fa-edit"></i></a>
+                    <a href="/admin/extend/{p['id']}" class="btn btn-small btn-success" title="Extend"><i class="fas fa-calendar-plus"></i></a>
+                    <a href="/admin/impersonate/{p['id']}" class="btn btn-small" style="background:#6c757d; color:white;" title="Impersonate"><i class="fas fa-user-secret"></i></a>
+                    <a href="/admin/toggle-provider/{p['id']}" class="btn btn-small {'btn-danger' if p['is_active'] else 'btn-success'}" title="{'Suspend' if p['is_active'] else 'Activate'}">
+                        <i class="fas {'fa-pause' if p['is_active'] else 'fa-play'}"></i>
+                    </a>
+                    <a href="/admin/delete-provider/{p['id']}" class="btn btn-small btn-danger" onclick="return confirm('Delete permanently?')" title="Delete"><i class="fas fa-trash"></i></a>
                 </div>
             </td>
         </tr>
@@ -3903,8 +3900,54 @@ def super_admin_dashboard():
     audit = db.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 20").fetchall()
     audit_rows = ''.join(f'<tr><td>{a["created_at"][:16]}</td><td>{a["action"]}</td><td>{a["details"]}</td></tr>' for a in audit) or '<tr><td colspan="3">No activity yet.</td></tr>'
     
+    # ---- CSS to prevent overflow ----
+    overflow_fix = '''
+    <style>
+        .table-responsive {
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+        }
+        .table-responsive table {
+            min-width: 900px;
+            width: 100%;
+        }
+        .btn-group .btn {
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            border-radius: 4px;
+            line-height: 1.2;
+            text-decoration: none;
+            display: inline-block;
+            border: 1px solid transparent;
+        }
+        .btn-group .btn i {
+            font-size: 0.85rem;
+        }
+        .btn-group .btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        /* Dropdown replacement: keep buttons visible and clean */
+        td .btn-group {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+        }
+        /* Ensure card doesn't clip anything */
+        .card {
+            overflow: visible !important;
+        }
+        .card .table-responsive {
+            overflow: visible !important;
+        }
+    </style>
+    '''
+    
     # ---- RENDER CONTENT ----
     content = f'''
+    {overflow_fix}
+    
     <div class="stat-grid">
         <div class="stat-card"><h3>{total_providers}</h3><small>Total Providers</small></div>
         <div class="stat-card"><h3>{active_providers}</h3><small>Active</small></div>
@@ -3920,14 +3963,24 @@ def super_admin_dashboard():
     
     <!-- Provider Management -->
     <div class="card">
-        <div class="card-header">Provider Management <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a></div>
+        <div class="card-header">
+            Provider Management
+            <a href="/admin/add-provider" class="btn btn-success btn-small">+ Add Provider</a>
+        </div>
         <div class="table-responsive" style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
             <table>
                 <thead>
                     <tr>
-                        <th>ID</th><th>Name</th><th>Contact</th><th>Status</th>
-                        <th>Revenue</th><th>Total Fee</th><th>Fee/Mo</th>
-                        <th>Vouchers</th><th>Expiry</th><th>Actions</th>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Contact</th>
+                        <th>Status</th>
+                        <th>Revenue</th>
+                        <th>Total Fee</th>
+                        <th>Fee/Mo</th>
+                        <th>Vouchers</th>
+                        <th>Expiry</th>
+                        <th style="min-width:140px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>{rows}</tbody>
